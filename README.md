@@ -6,6 +6,11 @@ A low-cost dynamics lab that allows students to perform System Identification on
 
 *Designed by Michael Ruppe for Monash University in partnership with MathWorks®*
 
+## Instructions
+
+- [Assembly Instructions](Assembly-Instruction.md)
+- [Programming Instructions](Programming-Instructions.md)
+
 
 ## Bill of Materials
 
