@@ -89,4 +89,6 @@ Push the coloured button caps onto the buttons - they will click into place.
 
 The mechanical assembly is complete. Check the carriage slides freely and returns near enough to centre to be satisfactory.
 
+![](Images/completed-assembly.jpg)
+
 Proceed with the [Programming Instructions](Programming-Instructions.md)
