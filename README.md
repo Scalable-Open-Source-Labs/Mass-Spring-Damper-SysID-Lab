@@ -8,7 +8,7 @@ A low-cost dynamics lab that allows students to perform System Identification on
 
 ## Instructions
 
-- [Assembly Instructions](Assembly-Instruction.md)
+- [Assembly Instructions](Assembly-Instructions.md)
 - [Programming Instructions](Programming-Instructions.md)
 
 
