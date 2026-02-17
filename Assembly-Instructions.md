@@ -1,6 +1,8 @@
-# Protective Equipment
+# Equipment required
 
-- Safety glasses
+- Safety glasses - **springs are under tension and may fly off mounts during assembly**.
+- Bit driver with 2.5mm hex bit
+- Side cutters
 
 # Assembly Instructions
 
@@ -15,7 +17,7 @@ Carefully snap off the following parts from the circuit board:
 
 ## Mount guides
 
-Use 6x M3x8mm screws to secure the guides to the circuit board.
+Use 6x M3x8mm screws to secure the guides to the circuit board. Both guides are identical.
 Ensure the arrows point upwards.
 
 ![](Images/mount-rails-exploded-view.png)
@@ -23,7 +25,7 @@ Ensure the arrows point upwards.
 ## Install Carriage
 
 - Slide the carriage into the guides. Ensure orientation of carriage graduation numbers is correct.
-- Centre the carriage and install the knurled screw. This will capture the carriage and prevent it falling out.
+- Centre the carriage and install the knurled screw. This will capture the carriage and prevent it falling out. Pliers may be helpful for torquing the screw. Consider adding a tiny drop of superglue or blue Loctite to prevent screw from loosening.
 
 ![](Images/install-carriage.png)
 
@@ -33,9 +35,6 @@ Ensure the arrows point upwards.
 2. Secure with a cable tie. The locking mechanism must be located on the same side of the circuit board as the USB connector.
 3. Trim excess.
 4. Ensure that no sharp plastic remains.
-
-
-Secure with a cable-tie and trim excess.
 
 ![](Images/install-usb-cable.jpg)
 
@@ -48,6 +47,7 @@ Insert the circuit board into the enclosure:
 - Seat the USB cable into the cable slot
 
 Use 4x M3x8mm screws to secure circuit board into enclosure
+
 
 ![](Images/install-enclosure.png)
 
