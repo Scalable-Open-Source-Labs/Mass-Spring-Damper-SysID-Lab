@@ -8,8 +8,10 @@
 
 Carefully snap off the following parts from the circuit board:
 
-- Spring retainer. Set this aside in the enclosure slot
-- Edge rails. These can be discarded
+1. Edge rails. These can be discarded
+2. Spring retainer. Install this into the enclosure's slot to keep safe, and set aside.
+
+![](Images/snap-parts.jpg)
 
 ## Mount guides
 
