@@ -1,4 +1,4 @@
-This is the source repo for the Mass Spring Damper SysID Lab - if you are looking for usage instructions, head to the [user-guide](https://scaleable-open-source-labs.github.io/mass-spring-damper-sysid-lab.html)
+This is the source repo for the Mass Spring Damper SysID Lab - if you are looking for usage instructions/lab notes, head to the [user-guide](https://monasheng.gitbook.io/scalable-labs/mass-spring-damper-sysid)
 
 ---
 
