@@ -8,6 +8,8 @@ Connect to a host computer with the USB cable. Unprogrammed boards (fresh from f
 
 An external Drive `RPI-RP2` should appear
 
-Click+Drag the desired firmware `.uf2` file into the `RPI-RP2` drive.
+Copy the `.uf2` firmware file onto the `RPI-RP2` drive.
 
 Once the file transfer is complete, the unit will automatically run the new firmware.
+
+The programmed unit should now operate as described in the [User Instructions](https://monasheng.gitbook.io/scalable-labs/mass-spring-damper-sysid). Move the carriage and observe the displacement reading updates sensibly.
