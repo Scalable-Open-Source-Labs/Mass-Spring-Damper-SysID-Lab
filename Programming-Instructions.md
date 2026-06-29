@@ -1,6 +1,6 @@
 # Programming Instructions
 
-Download the latest `.uf2` firmware file from the repository [Releases](https://github.com/Scalable-Open-Source-Labs/Mass-Spring-Damper-SysID-Lab/releases)
+Download the latest `.uf2` firmware file from the repository [Releases](https://github.com/Scalable-Open-Source-Labs/Mass-Spring-Damper-SysID-Lab/releases/latest)
 
 Connect to a host computer with the USB cable. Unprogrammed boards (fresh from factory) will automatically enter Firmware Update mode.
 > Programmed Units:
