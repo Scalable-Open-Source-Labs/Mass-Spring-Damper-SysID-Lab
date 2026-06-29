@@ -18,7 +18,7 @@ Carefully snap off the following parts from the circuit board:
 
 ## Mount guides
 
-Use 6x M3x8mm screws to secure the guides to the circuit board. Both guides are identical.
+Use 6x short (M3x8mm) screws to secure the guides to the circuit board. Both guides are identical.
 Ensure the arrows point upwards.
 
 ![](Images/mount-rails-exploded-view.png)
@@ -47,7 +47,7 @@ Insert the circuit board into the enclosure:
 - Guide the spring retainer through the rectangular hole in the circuit board.
 - Seat the USB cable into the cable slot
 
-Use 4x M3x8mm screws to secure circuit board into enclosure
+Use 4x short (M3x8mm) screws to secure circuit board into enclosure
 
 
 ![](Images/install-enclosure.png)
@@ -79,7 +79,7 @@ Push the coloured button caps onto the buttons - they will click into place.
 
 - Feed the cable blanking plate into position. It will be retained by the lid, once secured.
 - Seat the lid into the enclosure, taking care to capture the cable blanking plate correctly.
-- Fasten the lid with 2x M3x16mm and 2x M3x8mm screws
+- Fasten the lid with 2x long (M3x16mm) and 2x short (M3x8mm) screws
 - Check the buttons clear the lid and their action is not impeded.
 
 ![](Images/install-cable-blanking-plate.jpg)
