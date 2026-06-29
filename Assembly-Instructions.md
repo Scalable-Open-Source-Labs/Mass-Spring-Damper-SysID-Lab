@@ -1,8 +1,9 @@
 # Equipment required
 
 - Safety glasses - **springs are under tension and may fly off mounts during assembly**.
-- Bit driver with 2.5mm hex bit
+- Pliers
 - Side cutters
+- Bit driver with 2.5mm hex bit
 
 # Assembly Instructions
 
