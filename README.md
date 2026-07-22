@@ -26,3 +26,8 @@ A low-cost dynamics lab that allows students to perform System Identification on
 - Case
 - Guide Rails
 - Lid
+
+
+### PCB and PCBA
+- carriage is assembled bottom-side only
+- main board is assembled both sides
