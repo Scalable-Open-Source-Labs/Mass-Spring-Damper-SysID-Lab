@@ -34,9 +34,9 @@
 #define LSB(x) ((x)&0xFF)
 #define MSB(x) (((x) >> 8) & 0xFF)
 
-#define DESTINATION_URL "https://scaleable-open-source-labs.github.io/mass-spring-damper-sysid-lab.html"
+#define DESTINATION_URL "https://monasheng.gitbook.io/scalable-labs/mass-spring-damper-sysid"
 
-// The readme.htm file redirects to the project repo where usage and build instructions may be maintained.
+// The readme.htm file redirects to the lab notes page, rather than trying to cram rich, static content into RAM.
 #define README_CONTENTS "<html><head><meta http-equiv=\"refresh\" content=\"0;URL='" DESTINATION_URL "'\"/></head><body>Redirecting to <a href='" DESTINATION_URL "'>Mass Spring Damper SysID Lab Instruction Page</a></body></html>"
 
 ///------------- FAT12 Memory map -------------//

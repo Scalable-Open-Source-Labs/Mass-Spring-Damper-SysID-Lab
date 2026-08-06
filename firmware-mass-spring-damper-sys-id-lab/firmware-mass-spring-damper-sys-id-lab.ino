@@ -1,5 +1,5 @@
-#define VERSION_MAJOR 0
-#define VERSION_MINOR 2
+#define VERSION_MAJOR 1
+#define VERSION_MINOR 0
 
 // Create version string using preprocessor stringification
 #define STRINGIFY(x) #x
