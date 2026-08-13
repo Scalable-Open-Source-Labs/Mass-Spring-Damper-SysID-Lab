@@ -1,5 +1,5 @@
 #define VERSION_MAJOR 1
-#define VERSION_MINOR 0
+#define VERSION_MINOR 1
 
 // Create version string using preprocessor stringification
 #define STRINGIFY(x) #x
@@ -155,7 +155,8 @@ enum modes {
   INITIALISED,
   STANDBY,
   CAPTURE,
-  MOUNT_DRIVE
+  MOUNT_DRIVE,
+  TEST
 };
 modes mode = STANDBY;
 modes last_mode = INITIALISED;
@@ -175,6 +176,9 @@ void setup() {
   }
 
   gpio_initialise();
+
+  // Enter test mode if record button is held down at power-up/reset
+  if (digitalRead(btnRec) == 0) mode = TEST;
 
   // Set disk vendor id, product id and revision with string up to 8, 16, 4 characters respectively
   usb_msc.setID("DntPanic", "Mass Storage", VERSION_STRING);
@@ -209,6 +213,9 @@ void loop() {
       break;
     case MOUNT_DRIVE:
       handleMountDriveMode();
+      break;
+    case TEST:
+      handleTestMode();
       break;
   }
 }
@@ -314,6 +321,21 @@ void handleMountDriveMode() {
 #ifdef TINYUSB_NEED_POLLING_TASK
   TinyUSBDevice.task();
 #endif
+}
+
+void handleTestMode() {
+  // Optical channel sanity-check mode. Mirrors the raw pin state of chA/chB/chC onto 7-seg
+  // digits 0/1/2: top segment only when HIGH (beam clear), bottom segment only when LOW
+  // (beam blocked). Lets the user slide the carriage by hand and watch channels respond live.
+  const uint8_t channelPins[3] = { chA, chB, chC };
+
+  for (uint8_t i = 0; i < 3; i++) {
+    if (digitalRead(channelPins[i]) == HIGH) {
+      lc.setRow(0, i, 0x40);  // top segment only (HIGH = beam clear)
+    } else {
+      lc.setRow(0, i, 0x08);  // bottom segment only (LOW = beam blocked)
+    }
+  }
 }
 
 
