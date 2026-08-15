@@ -48,4 +48,6 @@ fp-info-cache
 # Local project settings
 *.kicad_prl
 
+# Machine-specific VS Code IntelliSense config (bakes in local Arduino toolchain paths)
+.vscode/c_cpp_properties.json
 

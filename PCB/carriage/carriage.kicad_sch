@@ -154,7 +154,7 @@
 				(hide yes)
 			)
 		)
-		(property "Datasheet" "~"
+		(property "Datasheet" "../Datasheet/SMTSO.pdf"
 			(at 85.09 101.6 0)
 			(effects
 				(font

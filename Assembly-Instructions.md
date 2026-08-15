@@ -1,3 +1,5 @@
+Before you begin, order all parts — see [Ordering Instructions](Ordering-Instructions.md) for the full BOM grouped by vendor/fabrication service.
+
 # Equipment required
 
 - Safety glasses - **springs are under tension and may fly off mounts during assembly**.

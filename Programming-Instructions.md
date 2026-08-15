@@ -3,7 +3,7 @@
 ## Flashing a Pre-compiled binary (Drag-and-drop programming)
 Use this method for batch programming, or for applying a firmware to a deployed unit.
 
-Download the latest `.uf2` firmware file from the repository [Releases](https://github.com/Scalable-Open-Source-Labs/Mass-Spring-Damper-SysID-Lab/releases/latest)
+Download the latest `.uf2` firmware file from the repository [Releases](https://github.com/Scaleable-Open-Source-Labs/Mass-Spring-Damper-SysID-Lab/releases/latest)
 
 Connect to a host computer with the USB cable. Unprogrammed boards (fresh from factory) will automatically enter Firmware Update mode.
 > Programmed Units:
