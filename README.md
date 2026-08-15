@@ -4,7 +4,7 @@
 
 A low-cost dynamics lab that allows students to perform System Identification on a real Mass-Spring-Damper system.
 
-This is the source repo — hardware, firmware, and enclosure design files. If you're looking for usage instructions or lab notes, head to the [user guide](https://monasheng.gitbook.io/scalable-labs/mass-spring-damper-sysid).
+This is the source repo where you can download files for manufacturing: hardware, firmware, and enclosure design files. If you're looking for usage instructions or lab notes, head to the [user guide](https://monasheng.gitbook.io/scalable-labs/mass-spring-damper-sysid).
 
 *Designed by Michael Ruppe for Monash University in partnership with MathWorks®*
 
@@ -21,6 +21,7 @@ This is the source repo — hardware, firmware, and enclosure design files. If y
 | [`Assembly-Instructions.md`](Assembly-Instructions.md) | Step-by-step mechanical build guide |
 | [`Programming-Instructions.md`](Programming-Instructions.md) | Flashing and firmware dev setup |
 | [`Ordering-Instructions.md`](Ordering-Instructions.md) | Bill of materials and where to order/fabricate each part |
+| [`RELEASING.md`](RELEASING.md) | Maintainer checklist for cutting a tagged release |
 
 ## Getting started
 

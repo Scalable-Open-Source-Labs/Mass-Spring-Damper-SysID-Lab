@@ -9,7 +9,7 @@ Quantities below are **per unit**. Multiply for a batch build.
 | Vendor / service | What you get |
 |---|---|
 | [JLCPCB](https://jlcpcb.com) | Main board + carriage, fabricated and assembled |
-| [JLC3DP](https://jlc3dp.com) (or in-house resin printer) | Case + Guide Rail |
+| [JLC3DP](https://jlc3dp.com) (or in-house printer) | Case + Guide Rail + Spacer |
 | [acrylicsonline.com.au](https://www.acrylicsonline.com.au) | Lid, laser-cut from 3mm clear acrylic |
 | [nhtb.com.au](https://nhtb.com.au) | M3 fasteners |
 | JLCMC | Knurled carriage-capture bolt |
@@ -31,14 +31,15 @@ Quantities below are **per unit**. Multiply for a batch build.
 
 Generate the gerbers, BOM, and CPL yourself before ordering — see [PCB/README.md](PCB/README.md) for the KiCad Fabrication Toolkit workflow. Don't use any BOM/gerber files you find lying around locally; always regenerate from the current source so what you order matches the current design.
 
-### 3D printing (resin) — JLC3DP or in-house
+### 3D printing — JLC3DP or in-house
 
-| Part | File | Qty |
-|---|---|---|
-| Case | [`Enclosure/Case - Resin Print.stl`](Enclosure/Case%20-%20Resin%20Print.stl) | 1 |
-| Guide Rail | [`Enclosure/Guide Rail variant-hrs20-cwc09 - Resin Print.stl`](Enclosure/Guide%20Rail%20variant-hrs20-cwc09%20-%20Resin%20Print.stl) | 2 (both guides are identical — print the same file twice) |
+| Part | File | Process | Qty |
+|---|---|---|---|
+| Case | [`Enclosure/Case - Resin Print.stl`](Enclosure/Case%20-%20Resin%20Print.stl) | Resin | 1 |
+| Guide Rail | [`Enclosure/Guide Rail variant-hrs20-cwc09 - Resin Print.stl`](Enclosure/Guide%20Rail%20variant-hrs20-cwc09%20-%20Resin%20Print.stl) | Resin | 2 (both guides are identical — print the same file twice) |
+| Spacer | [`Enclosure/Spacer - FDM or Resin Print.stl`](<Enclosure/Spacer - FDM or Resin Print.stl>) | FDM or resin | 2 |
 
-Production units were printed via [JLC3DP](https://jlc3dp.com). This is an open-source project, so if your institution has a suitable resin printer, printing in-house is equally valid — no need to use JLC3DP specifically.
+Production units were printed via [JLC3DP](https://jlc3dp.com). This is an open-source project, so if your institution has a suitable printer, printing in-house is equally valid — no need to use JLC3DP specifically.
 
 ### Laser cutting (acrylic) — acrylicsonline.com.au
 

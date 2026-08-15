@@ -6,4 +6,5 @@ Mechanical parts for the lab enclosure. Source models are maintained in OnShape 
 |---|---|---|
 | [`Case - Resin Print.stl`](Case%20-%20Resin%20Print.stl) | Main case | Resin print |
 | [`Guide Rail variant-hrs20-cwc09 - Resin Print.stl`](Guide%20Rail%20variant-hrs20-cwc09%20-%20Resin%20Print.stl) | Guide rail the carriage rides on | Resin print |
+| [`Spacer - FDM or Resin Print.stl`](Spacer%20-%20FDM%20or%20Resin%20Print.stl) | Spacer (qty 2 per unit) | FDM or resin print |
 | [`Lid - Lasercut Acrylic - Clear 3mm/`](Lid%20-%20Lasercut%20Acrylic%20-%20Clear%203mm/) | Lid, with cut drawing (`Lid.pdf`) and dimensions (`Lid-dimensions-and-notes.png`) | Lasercut, 3mm clear acrylic |

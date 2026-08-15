@@ -79,7 +79,10 @@ Push the coloured button caps onto the buttons - they will click into place.
 
 ## Mount Cable Blanking Plate and Lid
 
+> **TODO:** install the 2x spacers here, just before the lid goes on. Needs proper step text and photos — see [`Enclosure/Spacer - FDM or Resin Print.stl`](<Enclosure/Spacer - FDM or Resin Print.stl>). Do not remove this note until the step below is written and the images are in place.
+
 - Feed the cable blanking plate into position. It will be retained by the lid, once secured.
+- Install the 2x spacers.
 - Seat the lid into the enclosure, taking care to capture the cable blanking plate correctly.
 - Fasten the lid with 2x long (M3x16mm) and 2x short (M3x8mm) screws
 - Check the buttons clear the lid and their action is not impeded.
