@@ -8,7 +8,7 @@ This is the source repo where you can download files for manufacturing: hardware
 
 *Designed by Michael Ruppe for Monash University in partnership with MathWorks®*
 
-![Mass-spring-damper system diagram](PCB/main-board/images/image_2000_D_lineart.png)
+![Mass-spring-damper system diagram](Images/completed-assembly.jpg)
 
 ## Repo map
 
