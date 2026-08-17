@@ -47,6 +47,8 @@ Production units were printed via [JLC3DP](https://jlc3dp.com). This is an open-
 |---|---|---|---|
 | Lid | [`Enclosure/Lid - Lasercut Acrylic - Clear 3mm/Lid.pdf`](<Enclosure/Lid - Lasercut Acrylic - Clear 3mm/Lid.pdf>) | 3mm clear acrylic, clear | 1 |
 
+Submit [`Lid-dimensions-and-notes.png`](<Enclosure/Lid - Lasercut Acrylic - Clear 3mm/Lid-dimensions-and-notes.png>) alongside the cut file — it's a useful sanity check for the cutting service to confirm the vector was interpreted at the right scale/orientation before they cut.
+
 [acrylicsonline.com.au](https://www.acrylicsonline.com.au) supplies both the 3mm clear acrylic stock and the laser-cutting service at a reasonable price.
 
 ---
