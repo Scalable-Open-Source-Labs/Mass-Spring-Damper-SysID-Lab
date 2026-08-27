@@ -255,7 +255,7 @@
       "internal_id": "",
       "mfg": "",
       "mpn": "",
-      "sch_revision": "01"
+      "sch_revision": "1.2"
     },
     "layer_pairs": [],
     "layer_presets": [
@@ -501,7 +501,7 @@
       "different_unit_net": "error",
       "duplicate_reference": "error",
       "duplicate_sheet_names": "error",
-      "endpoint_off_grid": "warning",
+      "endpoint_off_grid": "ignore",
       "extra_units": "error",
       "field_name_whitespace": "warning",
       "footprint_filter": "warning",
@@ -806,7 +806,7 @@
         "uuid": "e408f3f6-5db2-41f4-a4ee-1704a305cc7b"
       }
     ],
-    "used_designators": "#SYM2",
+    "used_designators": "C23,R4-5,R7,R12,R26,R33-36,#PWR58,#PWR61-62,#SYM2",
     "variants": []
   },
   "sheets": [
