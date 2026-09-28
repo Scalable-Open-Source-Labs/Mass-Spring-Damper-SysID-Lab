@@ -10,7 +10,27 @@
 #include "Adafruit_TinyUSB.h"
 #include "ramdisk.h"
 #include "gpio.h"
+#include "calibration.h"
 #include "LedControlPatched.h"
+
+// Function Prototypes (plays nice with VSCode IntelliSense, Arduino doesn't care)
+static void writeToBlocks(const char* data, uint32_t len, uint32_t& current_block, uint32_t& block_offset);
+void handleStandbyMode();
+void handleCaptureMode();
+void handleMountDriveMode();
+void handleTestMode();
+void printTestSummary(const uint16_t minMv[], const uint16_t maxMv[]);
+void showTestMessage(const uint8_t word[3], unsigned long durationMs);
+void handleSerialCommand();
+void enableEncoderInterrupts();
+void disableEncoderInterrupts();
+void processEncoderChange();
+int getDirection(uint8_t prevState, uint8_t currState);
+int32_t msc_read_callback(uint32_t lba, void* buffer, uint32_t bufsize);
+int32_t msc_write_callback(uint32_t lba, uint8_t* buffer, uint32_t bufsize);
+void msc_flush_callback(void);
+bool msc_start_stop_callback(uint8_t power_condition, bool start, bool load_eject);
+bool msc_ready_callback(void);
 
 LedControl lc = LedControl(19, 18, 20, 1);
 
@@ -19,6 +39,11 @@ LedControl lc = LedControl(19, 18, 20, 1);
 #define USB_DETACH_DELAY_MS 10
 #define SERIAL_WAIT_MS 100
 #define POST_CAPTURE_DELAY_MS 1000
+#define TEST_STREAM_MS 50        // Test mode: 20 Hz live stream for the Serial Plotter
+#define BTN_DEBOUNCE_MS 30
+#define CAL_HOLD_MS 2000         // Test mode: hold REC this long to calibrate
+#define TEST_STATUS_MS 1500      // Test mode: how long "CAL"/"dEF" shows on entry
+#define TEST_RESULT_MS 2000      // Test mode: how long "CAL"/"Err"/"dEF" shows after calibrating or clearing
 
 // Volatile variables shared between ISR and main loop
 volatile bool stateChanged = false;
@@ -27,8 +52,17 @@ volatile int positionCounter = 0;
 // State tracking
 uint8_t currentState = 0;
 uint8_t previousState = 0;
+unsigned int invalidTransitions = 0;  // State changes the transition table rejects: comparators out of sequence, or a missed state
 
 unsigned long timestamp = 0;
+bool testStream = true;  // Test mode live stream, toggled with the S command
+unsigned long testMessageMs = 0;          // When the current test-mode status word went up
+unsigned long testMessageDurationMs = 0;  // How long it stays before the channel mirror resumes
+
+// Test-mode status words as raw 7-seg segment bytes, left to right
+const uint8_t WORD_CAL[3] = { 0x4E, 0x77, 0x0E };  // "CAL": running this unit's saved thresholds
+const uint8_t WORD_DEF[3] = { 0x3D, 0x4F, 0x47 };  // "dEF": no saved calibration, running the defaults
+const uint8_t WORD_ERR[3] = { 0x4F, 0x05, 0x05 };  // "Err": calibration refused, nothing saved
 
 Adafruit_USBD_MSC usb_msc;
 
@@ -56,17 +90,21 @@ void addDataPoint(uint32_t ms, int disp) {
 void generateCSV() {
   uint32_t current_block = 4;  // Data blocks start at block 4 (Block0: Boot, Block1: FAT1, Block2: FAT2, Block3: Root Dir)
   uint32_t block_offset = 0;
-  char line_buffer[20];  // Single line buffer
+  char line_buffer[32];  // Single line buffer. The header needs 29 bytes, the longest possible data row 24.
 
   // Write header
   uint32_t len = sprintf(line_buffer, "Time [us],Displacement [mm]\n");
   writeToBlocks(line_buffer, len, current_block, block_offset);
 
-  // Write data rows
+  // Write data rows, stopping at the last whole row that fits on the disk
   for (int i = 0; i < datapoint_count; i++) {
     len = sprintf(line_buffer, "%lu,%d\n",
                   timeseries[i].millisecond,
                   timeseries[i].displacement_mm);
+    if (current_block * DISK_BLOCK_SIZE + block_offset + len > DISK_BLOCK_NUM * DISK_BLOCK_SIZE) {
+      Serial.printf("CSV truncated at %d of %d rows (drive full)\n", i, datapoint_count);
+      break;
+    }
     writeToBlocks(line_buffer, len, current_block, block_offset);
   }
 
@@ -176,7 +214,8 @@ void setup() {
   }
 
   gpio_initialise();
-  Serial.printf("Firmware %s, Vref A/B/C: %u/%u/%u mV\n", VERSION_STRING, getVref(CH_A), getVref(CH_B), getVref(CH_C));
+  Serial.printf("# fw=%s VrefA=%u VrefB=%u VrefC=%u mV cal=%s\n", VERSION_STRING, getVref(CH_A), getVref(CH_B),
+                getVref(CH_C), isCalibrated() ? "yes" : "no");
 
   // Enter test mode if record button is held down at power-up/reset
   if (digitalRead(btnRec) == 0) mode = TEST;
@@ -265,6 +304,7 @@ void handleCaptureMode() {
     last_mode = mode;
 
     stateChanged = false;
+    invalidTransitions = 0;
     time_begin = micros();
   }
   static unsigned long lastMotion = 0;
@@ -294,7 +334,7 @@ void handleCaptureMode() {
 
   if (micros() - time_begin > 1000 * CAPTURE_TIMEOUT_MS || motionTimeout) {
     disableEncoderInterrupts();
-    Serial.println("Done");
+    Serial.printf("Done, %u invalid transitions\n", invalidTransitions);
     digitalWrite(ledRec, LOW);
     mode = MOUNT_DRIVE;
   }
@@ -325,16 +365,154 @@ void handleMountDriveMode() {
 }
 
 void handleTestMode() {
-  // Optical channel sanity-check mode. Mirrors the raw pin state of chA/chB/chC onto 7-seg
-  // digits 0/1/2: top segment only when HIGH (beam clear), bottom segment only when LOW
+  // Optical channel sanity-check, characterisation and calibration mode. Mirrors the raw pin state of chA/chB/chC
+  // onto 7-seg digits 0/1/2: top segment only when HIGH (beam clear), bottom segment only when LOW
   // (beam blocked). Lets the user slide the carriage by hand and watch channels respond live.
+  // Tap REC to start recording a sweep (all decimal points lit), and tap again to stop and print per-channel stats.
+  // Hold REC to calibrate from the recorded sweep: "CAL" saved, "Err" refused. Needs no serial connection.
+  // Also streams the buffered sensor voltages for the Serial Plotter.
   const uint8_t channelPins[3] = { chA, chB, chC };
+  static uint16_t sensorMv[NUM_CHANNELS], minMv[NUM_CHANNELS], maxMv[NUM_CHANNELS];
+  static unsigned long lastStreamMs = 0;
+  static bool btnPressed, pressHandled, recording, haveSweep;
+  static unsigned long btnChangedMs;
 
-  for (uint8_t i = 0; i < 3; i++) {
-    if (digitalRead(channelPins[i]) == HIGH) {
-      lc.setRow(0, i, 0x40);  // top segment only (HIGH = beam clear)
+  // Mode entry
+  if (mode != last_mode) {
+    last_mode = mode;
+    btnPressed = true;    // REC is still held from power-up,
+    pressHandled = true;  // and that press is neither a tap nor a hold
+    btnChangedMs = millis();
+    recording = false;
+    haveSweep = false;
+    Serial.println("# Test mode. Tap REC to record a sweep, tap again to stop and print stats. Hold REC to calibrate from the sweep.");
+    Serial.println("# Commands. A/B/C <mV> sets that channel's Vref (not saved), S toggles the stream, X clears the saved calibration.");
+    printCalibration();
+    showTestMessage(isCalibrated() ? WORD_CAL : WORD_DEF, TEST_STATUS_MS);
+  }
+
+  // REC: a tap starts or stops recording; a hold calibrates from the recorded sweep
+  bool btnDown = digitalRead(btnRec) == 0;
+  if (btnDown != btnPressed && millis() - btnChangedMs >= BTN_DEBOUNCE_MS) {
+    btnPressed = btnDown;
+    btnChangedMs = millis();
+    if (btnPressed) {
+      pressHandled = false;
+    } else if (!pressHandled) {  // Released before the hold time: a tap
+      if (recording) {
+        recording = false;
+        haveSweep = true;
+        printTestSummary(minMv, maxMv);
+      } else {
+        processEncoderChange();  // Sync previousState to the pins so the reset itself isn't counted
+        positionCounter = 0;
+        invalidTransitions = 0;
+        for (uint8_t ch = 0; ch < NUM_CHANNELS; ch++) {
+          minMv[ch] = UINT16_MAX;
+          maxMv[ch] = 0;
+        }
+        recording = true;
+      }
+    }
+  }
+  if (btnPressed && !pressHandled && millis() - btnChangedMs >= CAL_HOLD_MS) {
+    pressHandled = true;
+    if (recording) {  // A hold also ends the recording
+      recording = false;
+      haveSweep = true;
+      printTestSummary(minMv, maxMv);
+    }
+    if (!haveSweep) Serial.println("# calibration=failed reason=no_sweep");
+    bool saved = haveSweep && calibrateFromSweep(minMv, maxMv);
+    showTestMessage(saved ? WORD_CAL : WORD_ERR, TEST_RESULT_MS);
+  }
+
+  processEncoderChange();
+
+  for (uint8_t ch = 0; ch < NUM_CHANNELS; ch++) {
+    sensorMv[ch] = readSensorMillivolts(ch);
+    if (recording) {  // Stats freeze when recording stops, so a later hold calibrates from exactly that sweep
+      if (sensorMv[ch] < minMv[ch]) minMv[ch] = sensorMv[ch];
+      if (sensorMv[ch] > maxMv[ch]) maxMv[ch] = sensorMv[ch];
+    }
+  }
+
+  // Mirror the channels unless a status word is showing. All decimal points lit = recording.
+  if (millis() - testMessageMs >= testMessageDurationMs) {
+    uint8_t dp = recording ? 0x80 : 0;
+    for (uint8_t i = 0; i < 3; i++) {
+      if (digitalRead(channelPins[i]) == HIGH) {
+        lc.setRow(0, i, 0x40 | dp);  // top segment only (HIGH = beam clear)
+      } else {
+        lc.setRow(0, i, 0x08 | dp);  // bottom segment only (LOW = beam blocked)
+      }
+    }
+  }
+
+  if (testStream && millis() - lastStreamMs >= TEST_STREAM_MS) {
+    lastStreamMs = millis();
+    Serial.printf("A:%u,B:%u,C:%u,VrefA:%u,VrefB:%u,VrefC:%u\n", sensorMv[CH_A], sensorMv[CH_B], sensorMv[CH_C],
+                  getVref(CH_A), getVref(CH_B), getVref(CH_C));
+  }
+
+  handleSerialCommand();
+}
+
+// Per-channel stats for one sweep, all in mV. min/max are the light/dark levels on BUFF_x. rise/fall are where the
+// comparator switches at the current Vref, and the margins are how far the dark and light levels clear them. Balanced
+// margins mean a centred threshold; suggest is the Vref that would centre it. Everything is key=value, so the Serial
+// Plotter ignores these lines.
+void printTestSummary(const uint16_t minMv[], const uint16_t maxMv[]) {
+  for (uint8_t ch = 0; ch < NUM_CHANNELS; ch++) {
+    uint16_t mid = (minMv[ch] + maxMv[ch]) / 2;
+    uint16_t rise = comparatorRiseMillivolts(getVref(ch));
+    uint16_t fall = comparatorFallMillivolts(getVref(ch));
+    Serial.printf("# %c min=%u max=%u span=%d mid=%u vref=%u rise=%u fall=%u dark_margin=%d light_margin=%d suggest=%u\n",
+                  'A' + ch, minMv[ch], maxMv[ch], maxMv[ch] - minMv[ch], mid, getVref(ch), rise, fall,
+                  maxMv[ch] - rise, fall - minMv[ch], vrefForMidpoint(mid));
+  }
+  Serial.printf("# invalid_transitions=%u position=%d\n", invalidTransitions, positionCounter);
+}
+
+// Shows a 3-letter status word on the 7-seg, pausing the test-mode channel mirror for durationMs
+void showTestMessage(const uint8_t word[3], unsigned long durationMs) {
+  lc.setRow(0, 2, word[0]);
+  lc.setRow(0, 1, word[1]);
+  lc.setRow(0, 0, word[2]);
+  testMessageMs = millis();
+  testMessageDurationMs = durationMs;
+}
+
+// Test-mode commands, one per line. "A 820" sets channel A's Vref to 820 mV until reset (not saved). "S" toggles the
+// stream. "X" clears the saved calibration.
+void handleSerialCommand() {
+  static char line[16];
+  static uint8_t len = 0;
+
+  while (Serial.available()) {
+    char c = Serial.read();
+    if (c != '\n' && c != '\r') {
+      if (len < sizeof(line) - 1) line[len++] = c;
+      continue;
+    }
+    line[len] = '\0';
+    len = 0;
+    if (line[0] == '\0') continue;  // Blank line, or the second half of \r\n
+
+    char cmd = toupper(line[0]);
+    char* end;
+    long mv = strtol(line + 1, &end, 10);
+    if (cmd == 'S') {
+      testStream = !testStream;
+      Serial.printf("# stream=%s\n", testStream ? "on" : "off");
+    } else if (cmd == 'X') {
+      clearCalibration();
+      showTestMessage(WORD_DEF, TEST_RESULT_MS);
+    } else if (cmd >= 'A' && cmd <= 'C' && end != line + 1 && mv >= 0 && mv <= VDD_MV) {
+      setVref(cmd - 'A', mv);
+      Serial.printf("# Vref%c=%u mV (not saved)\n", cmd, getVref(cmd - 'A'));
     } else {
-      lc.setRow(0, i, 0x08);  // bottom segment only (LOW = beam blocked)
+      Serial.println("# Commands. A/B/C <mV> sets that channel's Vref (not saved), S toggles the stream, X clears the saved calibration.");
     }
   }
 }
@@ -358,6 +536,8 @@ void processEncoderChange() {
       noInterrupts();
       positionCounter += direction;
       interrupts();
+    } else {
+      invalidTransitions++;  // Skipped or impossible state: comparators fired out of sequence, or the loop missed a state
     }
 
     previousState = currentState;

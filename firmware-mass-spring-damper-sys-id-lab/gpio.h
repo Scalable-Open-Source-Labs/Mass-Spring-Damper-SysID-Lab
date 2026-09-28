@@ -15,6 +15,11 @@
 #define pwmB 13
 #define pwmC 14
 
+// Buffered sensor voltages: net BUFF_x via 220R. The ADC channel order differs from A/B/C.
+#define buffA 27  // ADC1
+#define buffB 28  // ADC2
+#define buffC 26  // ADC0
+
 #define btnRec 21
 #define ledRec 24  // Not connected on rev 2.0
 
@@ -30,13 +35,19 @@ enum channels {
   NUM_CHANNELS
 };
 
+#define VDD_MV 3300          // +3V3 rail: PWM high level (IOVDD) and ADC reference (ADC_AVDD)
 #define VREF_DEFAULT_MV 780  // Comparator threshold applied to every channel at startup
 
 // Function Prototypes
 void gpio_initialise(void);
 uint8_t readEncoderState(void);
 void setVref(uint8_t channel, uint16_t millivolts);
+void applyVrefs(const uint16_t millivolts[]);
 uint16_t getVref(uint8_t channel);
+uint16_t readSensorMillivolts(uint8_t channel);
+uint16_t comparatorRiseMillivolts(uint16_t vref);
+uint16_t comparatorFallMillivolts(uint16_t vref);
+uint16_t vrefForMidpoint(uint16_t midMillivolts);
 
 
 

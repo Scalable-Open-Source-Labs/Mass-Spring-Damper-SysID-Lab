@@ -3,5 +3,6 @@
     "board": "rp2040:rp2040:generic",
     "sketch": "firmware-mass-spring-damper-sys-id-lab/firmware-mass-spring-damper-sys-id-lab.ino",
     "port": "/dev/ttyUSB0",
-    "output": "/tmp/arduino/build_mass-spring-damper-lab/"
+    "output": "/tmp/arduino/build_mass-spring-damper-lab/",
+    "intelliSenseGen": "disable"
 }
