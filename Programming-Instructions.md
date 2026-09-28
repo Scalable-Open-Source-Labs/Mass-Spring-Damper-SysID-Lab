@@ -5,7 +5,7 @@ Use this method for batch programming, or for applying a firmware to a deployed 
 
 Download the latest `.uf2` firmware file from the repository [Releases](https://github.com/Scaleable-Open-Source-Labs/Mass-Spring-Damper-SysID-Lab/releases/latest)
 
-> Use the firmware from the same release as your circuit boards. Firmware 2.0 and later only work on main board rev 2.0. Rev 1.2 boards (release-2026-08-17) need the firmware from that release.
+> Use the firmware from the same release as your circuit boards. Firmware 2.0 and later only work on main board rev 2.0. Earlier boards (main board rev 1.x, including the pilot run in release-2026-08-17) need the firmware from that release.
 
 Connect to a host computer with the USB cable. Unprogrammed boards (fresh from factory) will automatically enter Firmware Update mode.
 > Programmed Units:
