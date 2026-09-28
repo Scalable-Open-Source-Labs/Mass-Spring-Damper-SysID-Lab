@@ -4,6 +4,8 @@ Arduino sketch for the RP2040 main board. It reads the linear encoder as the car
 
 For build/flash setup (Arduino IDE, board settings, library versions) and calibrating a unit whose encoder misbehaves, see [Programming-Instructions.md](../Programming-Instructions.md).
 
+The calibration maths and the encoder decoder have host tests that run on a PC. See [firmware-tests](../firmware-tests/README.md).
+
 ## Files
 
 | File | Role |
