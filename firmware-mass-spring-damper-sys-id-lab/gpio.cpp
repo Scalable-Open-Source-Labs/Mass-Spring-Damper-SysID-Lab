@@ -6,9 +6,8 @@
 #define VREF_SETTLE_MS 100      // 10 time constants of the 10k/1uF filter
 #define ADC_OVERSAMPLE 8
 
-// Comparator hysteresis, referred to BUFF_x: 10k series (R11/R17/R22) with 330k feedback (R6/R13/R18) from an output
-// pulled up to 3V3. The output switches HIGH as BUFF_x rises past Vref * 34/33, and back LOW 3300/33 = 100 mV below that.
-#define COMPARATOR_HYST_MV 100
+// Position of each encoder state in the Johnson sequence 000 100 110 111 011 001, or -1 for the two it never visits
+static const int8_t JOHNSON_INDEX[8] = { 0, 5, -1, 4, 1, -1, 2, 3 };
 
 static const uint8_t pwmPins[NUM_CHANNELS] = { pwmA, pwmB, pwmC };
 static const uint8_t buffPins[NUM_CHANNELS] = { buffA, buffB, buffC };
@@ -55,20 +54,10 @@ uint16_t readSensorMillivolts(uint8_t channel) {
   return sum * VDD_MV / (4096UL * ADC_OVERSAMPLE);
 }
 
-// BUFF_x voltage at which the comparator output switches LOW -> HIGH
+// Nominal BUFF_x voltage at which the comparator output switches LOW -> HIGH. The HIGH -> LOW point is
+// COMPARATOR_HYST_MV below it.
 uint16_t comparatorRiseMillivolts(uint16_t vref) {
   return ((uint32_t)vref * 34 + 16) / 33;
-}
-
-// BUFF_x voltage at which the comparator output switches HIGH -> LOW
-uint16_t comparatorFallMillivolts(uint16_t vref) {
-  uint16_t rise = comparatorRiseMillivolts(vref);
-  return rise > COMPARATOR_HYST_MV ? rise - COMPARATOR_HYST_MV : 0;
-}
-
-// Vref that centres the hysteresis band on the midpoint between a channel's light and dark levels
-uint16_t vrefForMidpoint(uint16_t midMillivolts) {
-  return ((uint32_t)(midMillivolts + COMPARATOR_HYST_MV / 2) * 33 + 17) / 34;
 }
 
 
@@ -82,4 +71,13 @@ uint8_t readEncoderState() {
   if (!digitalRead(chC)) state |= 0b001;
 
   return state;
+}
+
+// Signed steps along the Johnson sequence from prevState to currState: 0, +-1, +-2, or 3 when currState is the
+// opposite state and the direction is unknown. JOHNSON_INVALID when either state is 010 or 101.
+int8_t johnsonStep(uint8_t prevState, uint8_t currState) {
+  int8_t from = JOHNSON_INDEX[prevState & 0b111], to = JOHNSON_INDEX[currState & 0b111];
+  if (from < 0 || to < 0) return JOHNSON_INVALID;
+  int8_t step = (to - from + 6) % 6;
+  return step > 3 ? step - 6 : step;
 }

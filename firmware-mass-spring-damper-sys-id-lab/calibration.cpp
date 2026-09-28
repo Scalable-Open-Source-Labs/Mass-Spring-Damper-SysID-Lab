@@ -1,9 +1,11 @@
 #include <EEPROM.h>
 #include "calibration.h"
 #include "gpio.h"
+#include "sweep.h"
 
 #define CAL_MAGIC 0x4D534443  // "MSDC"
-#define CAL_VERSION 1         // Bump on any change to the struct or the meaning of its fields
+#define CAL_VERSION 2         // Bump on any change to the struct or the meaning of its fields. Version 1 centred each
+                              // threshold between the light and dark levels, which can push two channels' edges together.
 #define CAL_EEPROM_BYTES 256
 #define CAL_VREF_MIN_MV 200
 #define CAL_VREF_MAX_MV 2500
@@ -54,22 +56,49 @@ bool loadCalibration(uint16_t vref_mV[]) {
   return calibrated;
 }
 
-// Centres each channel's threshold between the light and dark levels of a sweep, then saves and applies them.
-// Saves nothing if any channel's levels are too close: the carriage wasn't swept end to end, or a sensor is weak.
-// The flash write stalls interrupts for tens of ms, so only call this from test mode.
-bool calibrateFromSweep(const uint16_t minMv[], const uint16_t maxMv[]) {
+// Sets the thresholds from the recorded sweep where they space the encoder's edges best: each channel light for half of
+// each strip period, with the others giving way when a margin holds one short (sweep.h). Then saves and applies them.
+// Saves nothing if a channel's light and dark levels are too close (a weak sensor), the sweep has too few full periods,
+// or the comparators, simulated over the sweep at the new thresholds, would leave any state narrower than
+// MIN_STATE_WIDTH_MM. The flash write stalls interrupts for tens of ms, so only call this from test mode.
+bool calibrateFromSweep() {
+  SweepResult r;
+  analyseSweep(r);
   Calibration cal = {};
   for (uint8_t ch = 0; ch < NUM_CHANNELS; ch++) {
-    uint16_t span = maxMv[ch] > minMv[ch] ? maxMv[ch] - minMv[ch] : 0;
-    uint16_t vref = vrefForMidpoint((minMv[ch] + maxMv[ch]) / 2);
-    if (span < MIN_SPAN_MV || !vrefInRange(vref)) {
-      Serial.printf("# calibration=failed ch=%c span=%u min_span=%u vref=%u\n", 'A' + ch, span, MIN_SPAN_MV, vref);
+    const ChannelResult& c = r.ch[ch];
+    uint16_t span = c.darkMv > c.lightMv ? c.darkMv - c.lightMv : 0;
+    if (span < MIN_SPAN_MV || c.suggest == SUGGEST_NO_ROOM) {  // needs: room for both margins and the hysteresis
+      Serial.printf("# calibration=failed reason=span ch=%c span=%u min_span=%u needs=%d\n", 'A' + ch, span,
+                    MIN_SPAN_MV, 2 * MIN_MARGIN_MV + c.riseMv - c.fallMv);
       return false;
     }
-    cal.vref_mV[ch] = vref;
-    cal.light_mV[ch] = minMv[ch];
-    cal.dark_mV[ch] = maxMv[ch];
+    if (c.suggest == SUGGEST_SHORT) {
+      Serial.printf("# calibration=failed reason=short_sweep ch=%c periods=%u min_periods=%u\n", 'A' + ch,
+                    r.hw.periods, SWEEP_MIN_PERIODS);
+      return false;
+    }
+    if (!vrefInRange(c.suggestVref)) {
+      Serial.printf("# calibration=failed reason=vref_range ch=%c vref=%u\n", 'A' + ch, c.suggestVref);
+      return false;
+    }
+    cal.vref_mV[ch] = c.suggestVref;
+    cal.light_mV[ch] = c.lightMv;
+    cal.dark_mV[ch] = c.darkMv;
   }
+
+  const Spacing& spacing = r.simSuggest;
+  if (spacing.periods < SWEEP_MIN_PERIODS) {
+    Serial.printf("# calibration=failed reason=short_sweep periods=%u min_periods=%u\n", spacing.periods,
+                  SWEEP_MIN_PERIODS);
+    return false;
+  }
+  if (spacing.invalid || spacing.minWidth < MIN_STATE_WIDTH_MM) {
+    Serial.printf("# calibration=failed reason=spacing invalid=%u min=%.2f min_width=%.2f\n", spacing.invalid,
+                  spacing.minWidth, MIN_STATE_WIDTH_MM);
+    return false;
+  }
+
   cal.magic = CAL_MAGIC;
   cal.version = CAL_VERSION;
   cal.crc = calibrationCrc(cal);
