@@ -255,7 +255,7 @@
       "internal_id": "",
       "mfg": "",
       "mpn": "",
-      "sch_revision": "1.2"
+      "sch_revision": "2.0"
     },
     "layer_pairs": [],
     "layer_presets": [
@@ -806,7 +806,7 @@
         "uuid": "e408f3f6-5db2-41f4-a4ee-1704a305cc7b"
       }
     ],
-    "used_designators": "C23,R4-5,R7,R12,R26,R33-36,#PWR58,#PWR61-62,#SYM2",
+    "used_designators": "C21,C23-28,TP7-11,R4-5,R7,R12,R26,R33-36,#PWR11,#PWR58,#PWR61-63,#SYM2",
     "variants": []
   },
   "sheets": [
