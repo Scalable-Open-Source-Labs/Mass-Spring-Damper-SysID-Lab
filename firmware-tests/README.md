@@ -36,6 +36,12 @@ A synthetic hand sweeps a synthetic encoder, and a copy of the test-mode loop re
   - slow, jerky and fast sweeps, and a long one;
   - mixed sensor strengths;
   - board 1, fitted to its sweeps of 2026-09-28.
+- **First-boot calibration (`autocal.cpp`):** a technician slides until the unit decides for itself. Each case checks what it saves, or the fault it names:
+  - steady slides, short rests, no rests at all, a rushed and sloppy hand, and a wobbly one, each with each analysis stalling the loop for 350 ms while the hand keeps moving;
+  - deep clipping, unclipped sensors, and a channel that never switches at the default threshold;
+  - a weak sensor, and misplaced sensors;
+  - two plucks (fast swings don't count, and anything saved must still be right);
+  - a carriage jiggled on the bench, which must never save or fault.
 
 ## Decoder test (`decoder_test.cpp`)
 

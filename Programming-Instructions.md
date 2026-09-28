@@ -17,15 +17,26 @@ Copy the `.uf2` firmware file onto the `RPI-RP2` drive.
 
 Once the file transfer is complete, the unit will automatically run the new firmware.
 
-The programmed unit should now operate as described in the [User Instructions](https://monasheng.gitbook.io/scalable-labs/mass-spring-damper-sysid). Move the carriage and observe the displacement reading updates sensibly.
+## First start: automatic calibration
+The first time a newly programmed unit starts, it calibrates its optical encoder to its own three sensors. This keeps the displacement reading reliable, since sensors vary between production batches. The display shows `SLd` (slide).
 
-If the reading doesn't behave, calibrate the optical encoder next. A unit that behaves doesn't need it.
+1. Slide the carriage from one end of its travel to the other and back, at a steady pace of about 2 seconds per slide. A brief pause at each end helps, but isn't needed. The three dots on the display fill from left to right as the unit collects enough good data.
+    - `SLo` means you are sliding too fast. Slow down.
+    - `Err` means the unit is starting its recording again. Keep sliding.
+2. Keep going until the display shows `CAL`. It shows `CAL` by itself, usually within about ten seconds, then switches to the displacement reading. There is no button to press.
+3. Let the carriage come to rest and press **Reset** to zero the reading. Pluck the carriage: the reading should return to 0 ±1 mm.
+
+If the display instead shows `E-A`, `E-b` or `E-C`, that optical sensor is faulty or misaligned. If it shows `E-S`, the sensors are misplaced relative to each other. Either way the unit fails. These codes stay on the display.
+
+The calibration is stored on the unit and kept through later firmware updates, so a unit calibrates like this only once. A unit that was calibrated with earlier firmware starts normally.
+
+The programmed unit should now operate as described in the [User Instructions](https://monasheng.gitbook.io/scalable-labs/mass-spring-damper-sysid).
+
+> Do not calibrate a 'naked PCB', where you might touch the circuit board under the sensors or the amplifier circuitry. Touching this area will invalidate the calibration.
 
 
-## Calibrating the optical encoder
-If a freshly-programmed unit does not behave, it may need calibrating. Calibration tunes the unit to its own three optical sensors, which vary between production batches, so the displacement reading stays reliable. The calibration is stored on the unit (EEPROM) and kept through firmware updates. No computer is needed: the unit's display gives all the feedback.
-
-Recalibrate if the circuit board or carriage is replaced, or if the displacement reading no longer returns to where it started.
+## Recalibrating the optical encoder
+Recalibrate if the circuit board or carriage is replaced, or if the displacement reading no longer returns to where it started. No computer is needed: the unit's display gives all the feedback.
 
 1. Hold down the **Record** button, then connect the USB cable (or press and release **Reset**). Keep holding **Record** until the display shows one of these, then release it:
     - `CAL`: the unit is already calibrated. Recalibrating is fine.

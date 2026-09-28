@@ -23,6 +23,7 @@ struct Spacing {
   float bestWidth;           // Narrowest the thresholds alone could reach: the smallest average of an opposite pair
   float duty[NUM_CHANNELS];  // Fraction of each period the channel reads light, NAN if no period was measured
   uint16_t periods;          // Full periods measured
+  uint16_t periodsEachWay[2];  // Of those, moving forward (000 to 100 to 110...) and backward
   uint16_t invalid;          // State changes that weren't a single step
 };
 
@@ -67,6 +68,11 @@ void sweepAdd(uint32_t pinUs, uint8_t state, const uint32_t adcUs[], const uint1
 void analyseSweep(SweepResult& result);
 void printSpacing(const char* label, const uint16_t vref[], const Spacing& spacing);
 void printDuty(const char* key, float duty);
+uint16_t sweepTravel(void);
+bool sweepTooFast(uint32_t nowUs);
+uint32_t sweepIdleUs(uint32_t nowUs);
+bool sweepFull(void);
+float sweepNarrowestAt(const uint16_t vref[]);
 const char* switchSourceName(SwitchSource source);
 
 

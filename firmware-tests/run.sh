@@ -16,7 +16,8 @@ if [ ! -s "$out/decoder_extracted.inc" ]; then
 fi
 
 g++ -std=gnu++17 -O2 -Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -I"$here" -I"$fw" \
-  -o "$out/calibration_test" "$here/calibration_test.cpp" "$fw/sweep.cpp" "$fw/gpio.cpp" "$fw/calibration.cpp"
+  -o "$out/calibration_test" "$here/calibration_test.cpp" "$fw/sweep.cpp" "$fw/gpio.cpp" "$fw/calibration.cpp" \
+  "$fw/autocal.cpp"
 g++ -std=gnu++17 -O2 -w -I"$here" -I"$fw" -I"$out" \
   -o "$out/decoder_test" "$here/decoder_test.cpp" "$fw/gpio.cpp"
 

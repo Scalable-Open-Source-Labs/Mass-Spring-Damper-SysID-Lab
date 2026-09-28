@@ -10,10 +10,11 @@ The calibration maths and the encoder decoder have host tests that run on a PC. 
 
 | File | Role |
 |---|---|
-| `firmware-mass-spring-damper-sys-id-lab.ino` | Main sketch: mode state machine, encoder capture, CSV data buffer, test mode |
+| `firmware-mass-spring-damper-sys-id-lab.ino` | Main sketch: mode state machine, encoder capture, CSV data buffer, test mode, first-boot calibration |
 | `gpio.cpp` / `gpio.h` | Pin definitions and GPIO init for the encoder, button, and display. Per-channel comparator thresholds (PWM through an RC filter) and sensor voltage readings (ADC) |
 | `calibration.cpp` / `.h` | Per-unit threshold calibration, saved to emulated EEPROM |
-| `sweep.cpp` / `.h` | Calibration-mode sweep recording and analysis: where each comparator actually switches, the width of each encoder state, and the thresholds that space the edges best |
+| `sweep.cpp` / `.h` | Sweep recording and analysis: where each comparator actually switches, the width of each encoder state, and the thresholds that space the edges best |
+| `autocal.cpp` / `.h` | First-boot calibration: when the recording is good enough to stop, and the faults that reject a unit |
 | `LedControlPatched.cpp` / `.h` | Fork of the [LedControl](https://wayoda.github.io/LedControl/) library, with local modifications, used to drive the 7-segment display |
 | `ramdisk.h` | USB Mass Storage (virtual FAT drive) implementation used to export captured data as a CSV file. The 32 KB image holds about 2,500 rows; `generateCSV()` stops at the last whole row that fits and reports it on serial |
 
@@ -43,6 +44,32 @@ The thresholds, and the light and dark levels, are saved with a CRC in emulated 
 
 If you change the `Calibration` struct in `calibration.cpp`, or the meaning of its fields, bump `CAL_VERSION`. Every unit then falls back to 780 mV until it is recalibrated.
 
+## First-boot calibration
+
+A unit that has never been calibrated calibrates itself at power-up (`calibrationBlank()`: the calibration sector holds no calibration, as on a freshly programmed chip). The technician only slides the carriage; the procedure is in [Programming-Instructions.md](../Programming-Instructions.md).
+- **Stale or corrupt data doesn't trigger it.** A deployed unit therefore never boots into calibration in front of students. It runs the defaults (`dEF`) until it is recalibrated in calibration mode.
+- **Recording** starts at power-up.
+  - **Display:** `SLd` (slide) throughout, its decimal points filling left to right in thirds of the 24 clean periods needed. There is deliberately no count, which could be read as a displacement.
+  - **Too fast:** `SLo` shows while the carriage covers a 6 mm period in under 24 ms (over 250 mm/s). That motion doesn't count as travel, and its switching points aren't used.
+- **Analysis blocks the loop** (`analyseSweep()`, about 260 to 440 ms on hardware), so it runs when the carriage rests.
+  - A rest is 300 ms without the carriage moving on. A comparator flickering back and forth across one edge while the carriage is held still counts as resting.
+  - The first analysis comes after 12 periods of travel, then one every 4 more.
+  - If no rest comes within 8 periods of an analysis falling due, it runs anyway.
+  - The recording marks every stall of the loop. State changes across a stall are neither counted as invalid nor used to measure widths, since the carriage may have moved unseen, so an analysis mid-motion only loses what it hid.
+- **It saves when all of these hold** (`autocal.h`):
+  - at least 24 clean periods at the suggested thresholds, with 8 each way;
+  - the previous analysis's suggestion, simulated on the new data, within 0.02 mm of the new one;
+  - the calibration gate: 0 invalid transitions and every state at least 0.5 mm;
+  - the narrowest state within 0.05 mm of `best`, unless a margin holds a channel back.
+
+  It then shows `CAL` and carries on in normal mode.
+- **Faults stay on the display and reject the unit:**
+  - `E-A`, `E-b` or `E-C`: that channel's light and dark levels are under 500 mV apart. This is only judged once another channel shows a full swing, so a jiggled carriage can't trigger it.
+  - `E-S`: with enough clean travel, even the best opposite pair of states is under 0.5 mm, so no thresholds can fix the sensors' placement.
+- **`Err`** means 96 periods of travel went by without settling (or the recording filled), and it starts over.
+- **Serial** prints each analysis (`# autocal travel=… analysis_ms=…`, then `# autocal_suggest` with the predicted widths), the full summary at the end, and the outcome (`# autocal=done`, `# autocal=fault reason=…`, `# autocal=start_over`). A bench PC can log these as each unit's QA record.
+- **Commands:** `K` skips calibrating for this boot and runs the defaults. `X` clears a saved calibration, so the next boot calibrates like a new unit, which is how to re-run it on the bench.
+
 ## Calibration Mode
 
 Hold **Record** at power-up or reset.
@@ -68,15 +95,17 @@ Hold **Record** at power-up or reset.
   - `# hw` is measured from the comparators during the sweep.
   - `# sim` is simulated at the current thresholds, and should match `hw`.
   - `# half` and `# suggest` are simulated at the half-duty and suggested thresholds.
+  - `periods` counts clean periods, and `each_way` splits them into forward and backward.
   - `min` is the narrowest state, the robustness figure.
   - `best` is what thresholds alone could reach, given where the sensors sit. `min` well below `best` points at the thresholds; both low points at the mechanics.
   - States are written with A as the left bit, so `w100` has A on a light stripe.
 - The last line gives the position and the decoder's `recovered` and `lost` counts.
 - The measurements are time-based, so sweep at a steady pace: about 2 seconds end to end, several times. Very slow sweeps are less accurate, because a hand's wobble is then a large fraction of the speed.
+- The recording keeps a reading whenever a sensor voltage has moved 20 mV, a comparator has switched, or 100 ms has passed. So pauses cost little, and resolution doesn't depend on how long the sweep takes. When its 4096 readings fill, it keeps every other one and doubles those steps.
 - Commands, one per line:
   - `A 820` (or `B`, `C`) sets that channel's threshold in mV until reset, without saving it.
   - `S` toggles the stream.
-  - `X` clears the saved calibration.
+  - `X` clears the saved calibration. The next boot then runs first-boot calibration.
 - Lines starting with `#` use `key=value` tokens so the Serial Plotter ignores them.
 
 In normal operation, each capture ends with `Done, N skipped states recovered, M counts lost` on serial.

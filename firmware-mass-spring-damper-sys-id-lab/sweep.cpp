@@ -1,7 +1,13 @@
 #include "sweep.h"
 #include <math.h>
 
-#define SWEEP_SAMPLES 4096     // Sensor readings kept. When full, every other one goes and the stride doubles.
+#define SWEEP_SAMPLES 4096     // Sensor readings kept. When full, every other one goes and the steps below double.
+#define SAMPLE_STEP_MV 20      // Keep a reading once any channel has moved this far since the last one kept,
+#define SAMPLE_GAP_US 100000   // or this long has passed, or a comparator has switched
+#define FAST_PERIOD_US 24000   // A strip period covered faster than this is over 250 mm/s: too fast to measure well
+#define FAST_SHOWN_US 500000   // How long sweepTooFast() stays true after the last period that fast
+#define STALL_US 20000         // Loops further apart than this mean the loop stalled (an analysis ran)
+#define MAX_STALLS 32
 #define SWEEP_CHANGES 1024     // Encoder state changes kept, from the comparators or a simulation
 #define SWITCH_READINGS 128    // Switching voltages kept per channel and direction
 #define MIN_SWITCH_READINGS 4  // Per direction, before a channel's own switching points are used
@@ -15,7 +21,8 @@ static const uint8_t JOHNSON_ORDER[6] = { 0b100, 0b110, 0b111, 0b011, 0b001, 0b0
 static uint32_t sampleUs[SWEEP_SAMPLES];
 static uint16_t sampleMv[SWEEP_SAMPLES][NUM_CHANNELS];
 static uint16_t sampleCount;
-static uint32_t sampleStride, strideCount;  // Loops per kept reading
+static uint16_t keepStepMv;  // SAMPLE_STEP_MV and SAMPLE_GAP_US, doubled each time the recording fills
+static uint32_t keepGapUs;
 
 static uint32_t hwUs[SWEEP_CHANGES];  // Comparator state changes: when each state was first read
 static uint8_t hwState[SWEEP_CHANGES];
@@ -32,6 +39,22 @@ static bool started;
 static uint32_t startUs, lastPinUs, lastAdcUs[NUM_CHANNELS];
 static uint16_t lastMv[NUM_CHANNELS];
 static uint8_t lastState;
+
+// How the carriage is moving: the times of the last seven state changes, and how many single steps the same way end at
+// the latest one
+static uint32_t changeUs[7];
+static uint8_t changeIndex;
+static int8_t runDirection;
+static uint8_t runLength;
+static uint16_t usableChanges;  // State changes made at a speed the recording can measure
+static uint32_t lastChangeUs, lastFastUs;
+static bool seenFast;
+static uint8_t stateBefore;  // The state before lastState: a change back to it is a flicker, not travel
+
+// Where the loop stalled, in us since the recording began. The carriage may have moved unseen, so nothing timed
+// across a stall is trusted.
+static uint32_t stallFromUs[MAX_STALLS], stallToUs[MAX_STALLS];
+static uint8_t stallCount;
 
 // Working space for the analysis
 static int16_t riseOffset[NUM_CHANNELS], fallOffset[NUM_CHANNELS];  // Switching points in use, offset as above
@@ -70,10 +93,16 @@ static int16_t medianOf(int16_t v[], uint8_t n) {
 // Starts a new recording. The thresholds in force now are the ones the sweep measures.
 void sweepBegin() {
   sampleCount = 0;
-  sampleStride = 1;
-  strideCount = 0;
+  keepStepMv = SAMPLE_STEP_MV;
+  keepGapUs = SAMPLE_GAP_US;
   hwCount = 0;
   started = false;
+  changeIndex = 0;
+  runDirection = 0;
+  runLength = 0;
+  usableChanges = 0;
+  seenFast = false;
+  stallCount = 0;
   for (uint8_t ch = 0; ch < NUM_CHANNELS; ch++) {
     riseCount[ch] = fallCount[ch] = 0;
     minMv[ch] = UINT16_MAX;
@@ -102,19 +131,46 @@ static void recordSwitch(uint8_t ch, bool wentLight, uint32_t pinUs, const uint3
 // Adds one test-mode loop to the recording: the encoder state read at pinUs, then each channel's sensor voltage, read
 // with its midpoint at adcUs
 void sweepAdd(uint32_t pinUs, uint8_t state, const uint32_t adcUs[], const uint16_t mv[]) {
+  bool switched = false, stalled = started && pinUs - lastPinUs > STALL_US;
+  if (stalled && stallCount < MAX_STALLS) {
+    stallFromUs[stallCount] = lastPinUs - startUs;
+    stallToUs[stallCount++] = pinUs - startUs;
+  }
   if (!started) {
     started = true;
-    startUs = pinUs;
+    startUs = lastChangeUs = pinUs;
+    stateBefore = state;
     hwUs[0] = 0;
     hwState[0] = state;
     hwCount = 1;
   } else if (state != lastState) {
+    switched = true;
     if (hwCount < SWEEP_CHANGES) {
       hwUs[hwCount] = pinUs - startUs;
       hwState[hwCount++] = state;
     }
+
+    // The speed, from the last full period of steady travel. Unknown after a reversal or a skipped state, which then
+    // count as usable.
+    int8_t step = johnsonStep(lastState, state);
+    bool single = step == 1 || step == -1;
+    runLength = single && step == runDirection ? runLength + 1 : single;
+    runDirection = step;
+    changeIndex = (changeIndex + 1) % 7;
+    changeUs[changeIndex] = pinUs;
+    bool fast = runLength >= 6 && pinUs - changeUs[(changeIndex + 1) % 7] < FAST_PERIOD_US;
+    if (fast) {
+      seenFast = true;
+      lastFastUs = pinUs;
+    } else {
+      usableChanges++;
+    }
+    if (state != stateBefore) lastChangeUs = pinUs;  // Flickering across one edge while held still is resting
+    stateBefore = lastState;
+
+    // At speed, or across a stall, the voltage moves too far between readings to place a switching point
     uint8_t changed = state ^ lastState;
-    for (uint8_t ch = 0; ch < NUM_CHANNELS; ch++) {
+    for (uint8_t ch = 0; !fast && !stalled && ch < NUM_CHANNELS; ch++) {
       if (changed & CHANNEL_BIT(ch)) recordSwitch(ch, state & CHANNEL_BIT(ch), pinUs, adcUs, mv);
     }
   }
@@ -124,15 +180,20 @@ void sweepAdd(uint32_t pinUs, uint8_t state, const uint32_t adcUs[], const uint1
     if (mv[ch] > maxMv[ch]) maxMv[ch] = mv[ch];
   }
 
-  if (++strideCount >= sampleStride) {
-    strideCount = 0;
-    if (sampleCount == SWEEP_SAMPLES) {  // Full: keep every other reading, and take half as many from now on
+  // Keep readings where something happens, not at a fixed rate, so pauses and slow hands cost little
+  bool keep = sampleCount == 0 || switched || pinUs - startUs - sampleUs[sampleCount - 1] >= keepGapUs;
+  for (uint8_t ch = 0; !keep && ch < NUM_CHANNELS; ch++) {
+    keep = abs((int32_t)mv[ch] - sampleMv[sampleCount - 1][ch]) >= keepStepMv;
+  }
+  if (keep) {
+    if (sampleCount == SWEEP_SAMPLES) {  // Full: keep every other reading, and keep half as often from now on
       for (uint16_t i = 0; i < SWEEP_SAMPLES / 2; i++) {
         sampleUs[i] = sampleUs[2 * i];
         memcpy(sampleMv[i], sampleMv[2 * i], sizeof sampleMv[i]);
       }
       sampleCount = SWEEP_SAMPLES / 2;
-      sampleStride *= 2;
+      keepStepMv *= 2;
+      keepGapUs *= 2;
     }
     sampleUs[sampleCount] = pinUs - startUs;
     memcpy(sampleMv[sampleCount++], mv, sizeof sampleMv[0]);
@@ -276,6 +337,14 @@ static float ownDuty(uint8_t ch, uint16_t vref) {
 
 // Finds the windows of steady travel in the reference simulation (the states just simulated): runs of seven single
 // steps the same way, so that simUs[k] to simUs[k + 6] is exactly one strip period
+// True if the loop stalled somewhere from fromUs to toUs
+static bool spansStall(uint32_t fromUs, uint32_t toUs) {
+  for (uint8_t i = 0; i < stallCount; i++) {
+    if (fromUs <= stallToUs[i] && toUs > stallFromUs[i]) return true;
+  }
+  return false;
+}
+
 static void findWindows(uint16_t changes) {
   referenceChanges = changes;
   windowCount = 0;
@@ -283,7 +352,7 @@ static void findWindows(uint16_t changes) {
     int8_t direction = johnsonStep(simState[k - 1], simState[k]);
     bool clean = direction == 1 || direction == -1;
     for (uint16_t j = k + 1; clean && j <= k + 6; j++) clean = johnsonStep(simState[j - 1], simState[j]) == direction;
-    if (clean) windowStart[windowCount++] = k;
+    if (clean && !spansStall(simUs[k], simUs[k + 6])) windowStart[windowCount++] = k;
   }
 }
 
@@ -375,27 +444,30 @@ static void findHalfDuty(uint8_t ch, ChannelResult& c, float (*dutyAt)(uint8_t c
 // Widths of the encoder states from a list of state changes (us[k] is when state[k] began). A dwell counts only when
 // the seven changes around it are single steps the same way, so that it sits inside one exact strip period. Its width
 // is its share of that period's time, which cancels hand speed. Reversals, pauses at the ends and skipped states break
-// the run and drop out.
+// the run and drop out, as does any period spanning a stall of the loop, which also isn't counted as invalid.
 static void analyseStates(const uint32_t us[], const uint8_t state[], uint16_t n, Spacing& s) {
   memset(&s, 0, sizeof s);
   uint16_t counts[8] = {};
-  uint16_t dwells = 0;
-  for (uint16_t k = 1; k < n; k++) {
+  uint16_t dwells = 0, dwellsEachWay[2] = {};
+  for (uint16_t k = 1; k < n; k++) {  // A change first seen after a stall may have skipped states unseen
     int8_t step = johnsonStep(state[k - 1], state[k]);
-    if (step != 1 && step != -1) s.invalid++;
+    if (step != 1 && step != -1 && !spansStall(us[k - 1], us[k])) s.invalid++;
   }
   for (uint16_t k = 3; k + 4 < n; k++) {  // Dwell k is the third of the six dwells from us[k - 2] to us[k + 4]
     int8_t direction = johnsonStep(state[k - 3], state[k - 2]);
     bool clean = direction == 1 || direction == -1;
     for (uint16_t j = k - 1; clean && j <= k + 4; j++) clean = johnsonStep(state[j - 1], state[j]) == direction;
-    if (!clean) continue;
+    if (!clean || spansStall(us[k - 2], us[k + 4])) continue;
     uint8_t st = state[k];
     if (counts[st] < sizeof stateWidths[0] / sizeof stateWidths[0][0]) {
       stateWidths[st][counts[st]++] = PERIOD_MM * (us[k + 1] - us[k]) / (float)(us[k + 4] - us[k - 2]);
       dwells++;
+      dwellsEachWay[direction == 1 ? 0 : 1]++;
     }
   }
   s.periods = dwells / 6;
+  s.periodsEachWay[0] = dwellsEachWay[0] / 6;
+  s.periodsEachWay[1] = dwellsEachWay[1] / 6;
 
   float total = 0;
   s.minWidth = INFINITY;
@@ -519,8 +591,8 @@ void analyseSweep(SweepResult& r) {
 
 // One Spacing as a key=value line, which the Serial Plotter ignores. Widths in mm, states with A as the left bit.
 void printSpacing(const char* label, const uint16_t vref[], const Spacing& s) {
-  Serial.printf("# %s vref=%u/%u/%u invalid=%u periods=%u", label, vref[CH_A], vref[CH_B], vref[CH_C], s.invalid,
-                s.periods);
+  Serial.printf("# %s vref=%u/%u/%u invalid=%u periods=%u each_way=%u/%u", label, vref[CH_A], vref[CH_B], vref[CH_C],
+                s.invalid, s.periods, s.periodsEachWay[0], s.periodsEachWay[1]);
   for (uint8_t st : JOHNSON_ORDER) Serial.printf(" w%u%u%u=%.2f", (st >> 2) & 1, (st >> 1) & 1, st & 1, s.width[st]);
   Serial.printf(" min=%.2f best=%.2f", s.minWidth, s.bestWidth);
   printDuty("dutyA", s.duty[CH_A]);
@@ -534,6 +606,32 @@ void printSpacing(const char* label, const uint16_t vref[], const Spacing& s) {
 void printDuty(const char* key, float duty) {
   if (isnan(duty)) Serial.printf(" %s=none", key);
   else Serial.printf(" %s=%.2f", key, duty);
+}
+
+// Periods of travel so far at a speed the recording can measure, counting every state change, clean or not
+uint16_t sweepTravel() {
+  return usableChanges / 6;
+}
+
+// True while the carriage has recently covered a strip period in under FAST_PERIOD_US
+bool sweepTooFast(uint32_t nowUs) {
+  return seenFast && nowUs - lastFastUs < FAST_SHOWN_US;
+}
+
+// How long since a comparator last switched: the carriage has stopped, or is resting at an end
+uint32_t sweepIdleUs(uint32_t nowUs) {
+  return started ? nowUs - lastChangeUs : 0;
+}
+
+// True once the log of state changes is full, after which the recording tells no more
+bool sweepFull() {
+  return hwCount >= SWEEP_CHANGES;
+}
+
+// The narrowest state these thresholds would leave over the recording, or -1 if they wouldn't decode it cleanly.
+// Uses the switching points that the last analyseSweep() settled.
+float sweepNarrowestAt(const uint16_t vref[]) {
+  return narrowestAt(vref);
 }
 
 const char* switchSourceName(SwitchSource source) {
