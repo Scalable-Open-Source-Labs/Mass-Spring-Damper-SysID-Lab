@@ -1,5 +1,5 @@
-#define VERSION_MAJOR 1
-#define VERSION_MINOR 1
+#define VERSION_MAJOR 2
+#define VERSION_MINOR 0
 
 // Create version string using preprocessor stringification
 #define STRINGIFY(x) #x
@@ -176,6 +176,7 @@ void setup() {
   }
 
   gpio_initialise();
+  Serial.printf("Firmware %s, Vref A/B/C: %u/%u/%u mV\n", VERSION_STRING, getVref(CH_A), getVref(CH_B), getVref(CH_C));
 
   // Enter test mode if record button is held down at power-up/reset
   if (digitalRead(btnRec) == 0) mode = TEST;
