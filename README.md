@@ -21,11 +21,13 @@ This is the source repo where you can download files for manufacturing: hardware
 | [`Assembly-Instructions.md`](Assembly-Instructions.md) | Step-by-step mechanical build guide |
 | [`Programming-Instructions.md`](Programming-Instructions.md) | Flashing and firmware dev setup |
 | [`Ordering-Instructions.md`](Ordering-Instructions.md) | Bill of materials and where to order/fabricate each part |
+| [`JLCPCB-Ordering-Instructions.md`](JLCPCB-Ordering-Instructions.md) | Step-by-step JLCPCB order for the fabricated and assembled boards |
 | [`RELEASING.md`](RELEASING.md) | Maintainer checklist for cutting a tagged release |
 
 ## Getting started
 
 - [Ordering Instructions](Ordering-Instructions.md)
+  - [JLCPCB Ordering Instructions](JLCPCB-Ordering-Instructions.md)
 - [Assembly Instructions](Assembly-Instructions.md)
 - [Programming Instructions](Programming-Instructions.md)
 - [Latest Project Release](https://github.com/Scaleable-Open-Source-Labs/Mass-Spring-Damper-SysID-Lab/releases/latest) - A downloadable bundle of all project files to complete this project: 3D Printing, PCBA, Lasercutting

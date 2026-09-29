@@ -24,12 +24,12 @@ Quantities below are **per unit**. Multiply for a batch build.
 
 ### PCB fabrication & assembly — JLCPCB
 
-| Board | Assembly | Qty |
-|---|---|---|
-| `PCB/main-board/` (DynaLab) | Both sides assembled | 1 |
-| `PCB/carriage/` | Bottom side only assembled | 1 |
+| Board | Soldermask / silkscreen | Assembly | Qty |
+|---|---|---|---|
+| `PCB/main-board/` (DynaLab) | White / black | Both sides assembled | 1 |
+| `PCB/carriage/` | Red / white | Bottom side only assembled | 1 |
 
-Generate the gerbers, BOM, and CPL yourself before ordering — see [PCB/README.md](PCB/README.md) for the KiCad Fabrication Toolkit workflow. Don't use any BOM/gerber files you find lying around locally; always regenerate from the current source so what you order matches the current design.
+Follow [JLCPCB Ordering Instructions](JLCPCB-Ordering-Instructions.md) for a step-by-step walkthrough of both orders, including the placement checks that catch rotated parts. Use the fab files from the latest release, not any BOM or gerber files you find lying around locally, so what you order matches the current design.
 
 ### 3D printing — JLC3DP or in-house
 
