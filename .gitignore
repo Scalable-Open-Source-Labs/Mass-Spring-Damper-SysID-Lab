@@ -52,3 +52,7 @@ fp-info-cache
 # Board settings for building the firmware are in Programming-Instructions.md.
 .vscode/
 
+# Python bytecode (e.g. from the illustration generator in Images/calibration/)
+__pycache__/
+*.pyc
+
