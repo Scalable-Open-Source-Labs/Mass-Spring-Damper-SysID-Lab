@@ -23,15 +23,15 @@ If the reading doesn't behave, calibrate the optical encoder next. A unit that b
 
 
 ## Calibrating the optical encoder
-If a freshly-programmed unit does not behave, it may need calibrating. Calibration tunes the unit to its own three optical sensors, which vary between production batches, so the displacement reading stays reliable. The calibration is stored on the unit (EEPROM) and kept through firmware updates. No computer is needed: the unit's display gives all the feedback.
+Each unit requires calibration on it's first powerup after being programmed. Calibration tunes the unit to its own three optical sensors, which vary between production batches, so the displacement reading stays reliable. The calibration is stored on the unit (EEPROM) and kept through firmware updates. No computer is needed: the unit's display gives all the feedback.
 
-Recalibrate if the circuit board or carriage is replaced, or if the displacement reading no longer returns to where it started.
+Recalibrate if the circuit board or carriage is replaced, or if the displacement reading no longer returns to where it started +-1mm.
 
 1. Hold down the **Record** button, then connect the USB cable (or press and release **Reset**). Keep holding **Record** until the display shows one of these, then release it:
     - `CAL`: the unit is already calibrated. Recalibrating is fine.
     - `dEF`: the unit isn't calibrated yet and is running default settings.
 
-   After a moment, each digit shows one sensor as a bar at the top or bottom of the digit, which jumps as the carriage moves.
+   After a moment, each digit shows one sensor as a bar at the top or bottom of the digit, which jumps as the carriage moves. Slowly sliding the carriage should make the bars ripple in a wavelike pattern.
 2. Tap **Record**. All three decimal points light up: the unit is recording.
 3. Slide the carriage from one end of its travel to the other and back, at a steady pace of about 2 seconds per slide. Do this at least four times (two round trips). Steady matters more than slow.
 4. Hold **Record** until the display changes, about 2 seconds:
@@ -42,6 +42,9 @@ Recalibrate if the circuit board or carriage is replaced, or if the displacement
 
 > Do not perform the procedure on a 'naked PCB' where you might be able to touch the circuit board under the sensors or amplifier circuitry. Touching this area will invalidate the calibration.
 
+
+## Batch Programming
+Programming many units in a batch becomes tedious. The [batch-uf2](https://github.com/michaelruppe/batch-uf2) streamlines production programming of many units. It watches for a UF2 bootloader drive to appear, copies a firmware file to it, waits for the device to reset and disappear, then goes back to waiting. Repeats until you cancel it.
 
 ## IDE Programming
 This method is for actively developing new code.
