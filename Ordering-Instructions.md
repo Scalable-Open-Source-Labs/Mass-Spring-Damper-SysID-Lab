@@ -91,5 +91,5 @@ Submit [`Lid-dimensions-and-notes.png`](<Enclosure/Lid - Lasercut Acrylic - Clea
 
 | Item | Qty | Notes |
 |---|---|---|
-| Cable tie | 1 | **TODO — part not yet finalized.** The locking mechanism must be no more than **4mm deep** (the dimension the tail passes through) — oversized locking mechanisms mechanically foul against the enclosure during installation. Confirm this dimension against any candidate part before bulk ordering |
+| Cable tie | 1 | Bunnings I/N [4431099](https://www.bunnings.com.au/crescent-100mm-x-2-5mm-black-cable-ties-100-pack_p4431099). The locking mechanism must be no more than **4mm deep** (the axis through which the tail passes through) — oversized locking mechanisms mechanically foul against the enclosure during installation. Confirm this dimension against any candidate part before bulk ordering |
 | Threadlocker — Loctite 242 (or equivalent medium-strength) | small qty | Recommended on the knurled carriage-capture bolt to prevent loosening in use |
