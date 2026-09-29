@@ -11,6 +11,7 @@
 #include "ramdisk.h"
 #include "gpio.h"
 #include "calibration.h"
+#include "sweep.h"
 #include "LedControlPatched.h"
 
 // Function Prototypes (plays nice with VSCode IntelliSense, Arduino doesn't care)
@@ -19,13 +20,12 @@ void handleStandbyMode();
 void handleCaptureMode();
 void handleMountDriveMode();
 void handleTestMode();
-void printTestSummary(const uint16_t minMv[], const uint16_t maxMv[]);
+void printTestSummary();
 void showTestMessage(const uint8_t word[3], unsigned long durationMs);
 void handleSerialCommand();
 void enableEncoderInterrupts();
 void disableEncoderInterrupts();
 void processEncoderChange();
-int getDirection(uint8_t prevState, uint8_t currState);
 int32_t msc_read_callback(uint32_t lba, void* buffer, uint32_t bufsize);
 int32_t msc_write_callback(uint32_t lba, uint8_t* buffer, uint32_t bufsize);
 void msc_flush_callback(void);
@@ -51,8 +51,9 @@ volatile int positionCounter = 0;
 
 // State tracking
 uint8_t currentState = 0;
-uint8_t previousState = 0;
-unsigned int invalidTransitions = 0;  // State changes the transition table rejects: comparators out of sequence, or a missed state
+uint8_t previousState = 0;        // The last valid state: 010 and 101 are never kept
+unsigned int recoveredSkips = 0;  // Two-state jumps counted as +-2: a state the loop missed, or two edges that crossed
+unsigned int lostCounts = 0;      // Jumps to the opposite state, whose direction is unknown, so their count is lost
 
 unsigned long timestamp = 0;
 bool testStream = true;  // Test mode live stream, toggled with the S command
@@ -304,7 +305,8 @@ void handleCaptureMode() {
     last_mode = mode;
 
     stateChanged = false;
-    invalidTransitions = 0;
+    recoveredSkips = 0;
+    lostCounts = 0;
     time_begin = micros();
   }
   static unsigned long lastMotion = 0;
@@ -334,7 +336,7 @@ void handleCaptureMode() {
 
   if (micros() - time_begin > 1000 * CAPTURE_TIMEOUT_MS || motionTimeout) {
     disableEncoderInterrupts();
-    Serial.printf("Done, %u invalid transitions\n", invalidTransitions);
+    Serial.printf("Done, %u skipped states recovered, %u counts lost\n", recoveredSkips, lostCounts);
     digitalWrite(ledRec, LOW);
     mode = MOUNT_DRIVE;
   }
@@ -368,11 +370,11 @@ void handleTestMode() {
   // Optical channel sanity-check, characterisation and calibration mode. Mirrors the raw pin state of chA/chB/chC
   // onto 7-seg digits 0/1/2: top segment only when HIGH (beam clear), bottom segment only when LOW
   // (beam blocked). Lets the user slide the carriage by hand and watch channels respond live.
-  // Tap REC to start recording a sweep (all decimal points lit), and tap again to stop and print per-channel stats.
-  // Hold REC to calibrate from the recorded sweep: "CAL" saved, "Err" refused. Needs no serial connection.
+  // Tap REC to start recording a sweep (all decimal points lit), and tap again to stop and print what it measured
+  // (sweep.h). Hold REC to calibrate from the recorded sweep: "CAL" saved, "Err" refused. Needs no serial connection.
   // Also streams the buffered sensor voltages for the Serial Plotter.
   const uint8_t channelPins[3] = { chA, chB, chC };
-  static uint16_t sensorMv[NUM_CHANNELS], minMv[NUM_CHANNELS], maxMv[NUM_CHANNELS];
+  static uint16_t sensorMv[NUM_CHANNELS];
   static unsigned long lastStreamMs = 0;
   static bool btnPressed, pressHandled, recording, haveSweep;
   static unsigned long btnChangedMs;
@@ -402,15 +404,13 @@ void handleTestMode() {
       if (recording) {
         recording = false;
         haveSweep = true;
-        printTestSummary(minMv, maxMv);
+        printTestSummary();
       } else {
         processEncoderChange();  // Sync previousState to the pins so the reset itself isn't counted
         positionCounter = 0;
-        invalidTransitions = 0;
-        for (uint8_t ch = 0; ch < NUM_CHANNELS; ch++) {
-          minMv[ch] = UINT16_MAX;
-          maxMv[ch] = 0;
-        }
+        recoveredSkips = 0;
+        lostCounts = 0;
+        sweepBegin();
         recording = true;
       }
     }
@@ -420,22 +420,24 @@ void handleTestMode() {
     if (recording) {  // A hold also ends the recording
       recording = false;
       haveSweep = true;
-      printTestSummary(minMv, maxMv);
+      printTestSummary();
     }
     if (!haveSweep) Serial.println("# calibration=failed reason=no_sweep");
-    bool saved = haveSweep && calibrateFromSweep(minMv, maxMv);
+    bool saved = haveSweep && calibrateFromSweep();
     showTestMessage(saved ? WORD_CAL : WORD_ERR, TEST_RESULT_MS);
   }
 
+  uint32_t pinUs = micros();  // The comparator states, then each sensor voltage, read back to back
   processEncoderChange();
 
+  uint32_t adcUs[NUM_CHANNELS];
   for (uint8_t ch = 0; ch < NUM_CHANNELS; ch++) {
+    uint32_t readStartUs = micros();
     sensorMv[ch] = readSensorMillivolts(ch);
-    if (recording) {  // Stats freeze when recording stops, so a later hold calibrates from exactly that sweep
-      if (sensorMv[ch] < minMv[ch]) minMv[ch] = sensorMv[ch];
-      if (sensorMv[ch] > maxMv[ch]) maxMv[ch] = sensorMv[ch];
-    }
+    adcUs[ch] = readStartUs + (micros() - readStartUs) / 2;  // The middle of the oversampled read
   }
+  // The recording freezes when it stops, so a later hold calibrates from exactly that sweep
+  if (recording) sweepAdd(pinUs, currentState, adcUs, sensorMv);
 
   // Mirror the channels unless a status word is showing. All decimal points lit = recording.
   if (millis() - testMessageMs >= testMessageDurationMs) {
@@ -458,20 +460,47 @@ void handleTestMode() {
   handleSerialCommand();
 }
 
-// Per-channel stats for one sweep, all in mV. min/max are the light/dark levels on BUFF_x. rise/fall are where the
-// comparator switches at the current Vref, and the margins are how far the dark and light levels clear them. Balanced
-// margins mean a centred threshold; suggest is the Vref that would centre it. Everything is key=value, so the Serial
-// Plotter ignores these lines.
-void printTestSummary(const uint16_t minMv[], const uint16_t maxMv[]) {
+// What one sweep measured. Per channel, in mV: min/max are the light/dark levels on BUFF_x; rise/fall are where the
+// comparator switched at the Vref in force (hyst_src says whether they were measured), and the margins are how far the
+// dark and light levels cleared them. duty is the fraction of each period it read light; half is the Vref that makes
+// that half, and suggest is where the three Vrefs together space the edges best. Then the widths of the six encoder
+// states in mm (ideally 1 each): from the comparators (hw), and simulated at the current (sim), half-duty (half) and
+// suggested (suggest) Vrefs. Everything is key=value, so the Serial Plotter ignores it.
+void printTestSummary() {
+  SweepResult r;
+  analyseSweep(r);
+  uint16_t active[NUM_CHANNELS], half[NUM_CHANNELS], suggested[NUM_CHANNELS];
+  bool haveSuggestion = true;
   for (uint8_t ch = 0; ch < NUM_CHANNELS; ch++) {
-    uint16_t mid = (minMv[ch] + maxMv[ch]) / 2;
-    uint16_t rise = comparatorRiseMillivolts(getVref(ch));
-    uint16_t fall = comparatorFallMillivolts(getVref(ch));
-    Serial.printf("# %c min=%u max=%u span=%d mid=%u vref=%u rise=%u fall=%u dark_margin=%d light_margin=%d suggest=%u\n",
-                  'A' + ch, minMv[ch], maxMv[ch], maxMv[ch] - minMv[ch], mid, getVref(ch), rise, fall,
-                  maxMv[ch] - rise, fall - minMv[ch], vrefForMidpoint(mid));
+    const ChannelResult& c = r.ch[ch];
+    active[ch] = c.vref;
+    half[ch] = c.halfVref;
+    suggested[ch] = c.suggestVref;
+    haveSuggestion = haveSuggestion && c.suggestVref;
+    Serial.printf("# %c min=%u max=%u span=%d mid=%u vref=%u rise=%d fall=%d hyst=%d edges=%u hyst_src=%s "
+                  "dark_margin=%d light_margin=%d",
+                  'A' + ch, c.lightMv, c.darkMv, c.darkMv - c.lightMv, (c.lightMv + c.darkMv) / 2, c.vref, c.riseMv,
+                  c.fallMv, c.riseMv - c.fallMv, c.switchReadings, switchSourceName(c.switchSource),
+                  c.darkMv - c.riseMv, c.fallMv - c.lightMv);
+    printDuty("duty", c.duty);
+    if (!c.halfVref) {
+      Serial.printf(" suggest=none reason=%s\n", c.suggest == SUGGEST_NO_ROOM ? "no_room" : "short_sweep");
+      continue;
+    }
+    Serial.printf(" half=%u%s", c.halfVref,
+                  c.suggest == SUGGEST_LIGHT_BOUND  ? " clamped=light"
+                  : c.suggest == SUGGEST_DARK_BOUND ? " clamped=dark"
+                                                    : "");
+    if (c.suggestVref) Serial.printf(" suggest=%u", c.suggestVref);
+    Serial.println();
   }
-  Serial.printf("# invalid_transitions=%u position=%d\n", invalidTransitions, positionCounter);
+  printSpacing("hw", active, r.hw);
+  printSpacing("sim", active, r.simActive);
+  if (haveSuggestion) {
+    printSpacing("half", half, r.simHalf);
+    printSpacing("suggest", suggested, r.simSuggest);
+  }
+  Serial.printf("# recovered=%u lost=%u position=%d\n", recoveredSkips, lostCounts, positionCounter);
 }
 
 // Shows a 3-letter status word on the 7-seg, pausing the test-mode channel mirror for durationMs
@@ -524,47 +553,26 @@ void encoderISR() {
   stateChanged = true;
 }
 
-// Process encoder state change and update position
+// Process encoder state change and update position, counting from the last valid state. A jump of two states is
+// unambiguous in the Johnson sequence, so it counts instead of being lost: the loop missed a state, or two channels'
+// edges crossed (passing through 010 or 101, which are held until the next valid state). Only a jump to the opposite
+// state, whose direction is unknown, loses its count.
 void processEncoderChange() {
   currentState = readEncoderState();
-  // Only process if state actually changed
-  if (currentState != previousState) {
-    int direction = getDirection(previousState, currentState);
+  if (currentState == previousState) return;
 
-    if (direction != 0) {
-      // Disable interrupts briefly while updating position
-      noInterrupts();
-      positionCounter += direction;
-      interrupts();
-    } else {
-      invalidTransitions++;  // Skipped or impossible state: comparators fired out of sequence, or the loop missed a state
-    }
-
-    previousState = currentState;
+  int8_t step = johnsonStep(previousState, currentState);
+  if (step == JOHNSON_INVALID) return;
+  if (step == 3) {
+    lostCounts++;
+  } else {
+    if (step == 2 || step == -2) recoveredSkips++;
+    // Disable interrupts briefly while updating position
+    noInterrupts();
+    positionCounter += step;
+    interrupts();
   }
-}
-
-// Encoder state transition lookup table
-// each state is encoded by the 3-bit value of the optical sensors.
-// Index: [previous_state][current_state] -> direction
-// Returns: +1 forward, -1 reverse, 0 invalid/no-change
-const int8_t ENCODER_TRANSITION_TABLE[8][8] = {
-  { 0, -1, 0, 0, 1, 0, 0, 0 },  // 0 (0b000) previous
-  { 1, 0, 0, -1, 0, 0, 0, 0 },  // 1 (0b001)
-  { 0, 0, 0, 0, 0, 0, 0, 0 },   // 2 (0b010) invalid
-  { 0, 1, 0, 0, 0, 0, 0, -1 },  // 3 (0b011)
-  { -1, 0, 0, 0, 0, 0, 1, 0 },  // 4 (0b100)
-  { 0, 0, 0, 0, 0, 0, 0, 0 },   // 5 (0b101) invalid
-  { 0, 0, 0, 0, -1, 0, 0, 1 },  // 6 (0b110)
-  { 0, 0, 0, 1, 0, 0, -1, 0 },  // 7 (0b111)
-};
-
-// Simplified direction function - single lookup, no searching
-int getDirection(uint8_t prevState, uint8_t currState) {
-  // Bounds check for safety
-  if (prevState > 7 || currState > 7) return 0;
-
-  return ENCODER_TRANSITION_TABLE[prevState][currState];
+  previousState = currentState;
 }
 
 

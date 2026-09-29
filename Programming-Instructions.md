@@ -19,7 +19,7 @@ Once the file transfer is complete, the unit will automatically run the new firm
 
 The programmed unit should now operate as described in the [User Instructions](https://monasheng.gitbook.io/scalable-labs/mass-spring-damper-sysid). Move the carriage and observe the displacement reading updates sensibly.
 
-A newly programmed unit must be calibrated next.
+If the reading doesn't behave, calibrate the optical encoder next. A unit that behaves doesn't need it.
 
 
 ## Calibrating the optical encoder
@@ -33,10 +33,10 @@ Recalibrate if the circuit board or carriage is replaced, or if the displacement
 
    After a moment, each digit shows one sensor as a bar at the top or bottom of the digit, which jumps as the carriage moves.
 2. Tap **Record**. All three decimal points light up: the unit is recording.
-3. Slide the carriage very slowly from one end of its travel to the other, a few times.
+3. Slide the carriage from one end of its travel to the other and back, at a steady pace of about 2 seconds per slide. Do this at least four times (two round trips). Steady matters more than slow.
 4. Hold **Record** until the display changes, about 2 seconds:
     - `CAL`: calibration saved.
-    - `Err`: nothing was saved, and any earlier calibration is kept. Tap **Record** and repeat from step 3, making sure the carriage reaches both ends. If `Err` keeps appearing, the unit has a faulty sensor.
+    - `Err`: nothing was saved, and any earlier calibration is kept. Tap **Record** and repeat from step 3, making sure the carriage reaches both ends at a steady pace. If `Err` keeps appearing, the unit has a faulty or misaligned sensor.
 5. Slide the carriage end to end again. All three digits should now jump between top and bottom. If one doesn't, the unit has a faulty sensor.
 6. Press **Reset** to return to normal operation. From a zeroed position, pluck the carriage and it should return to zero or +- 1mm
 
