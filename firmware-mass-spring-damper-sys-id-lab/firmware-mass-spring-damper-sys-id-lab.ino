@@ -12,6 +12,7 @@
 #include "gpio.h"
 #include "calibration.h"
 #include "sweep.h"
+#include "autocal.h"
 #include "LedControlPatched.h"
 
 // Function Prototypes (plays nice with VSCode IntelliSense, Arduino doesn't care)
@@ -20,7 +21,9 @@ void handleStandbyMode();
 void handleCaptureMode();
 void handleMountDriveMode();
 void handleTestMode();
-void printTestSummary();
+void handleAutoCalMode();
+void readSensors(uint32_t& pinUs, uint32_t adcUs[], uint16_t mv[]);
+void printSweepSummary(const SweepResult& r);
 void showTestMessage(const uint8_t word[3], unsigned long durationMs);
 void handleSerialCommand();
 void enableEncoderInterrupts();
@@ -44,6 +47,7 @@ LedControl lc = LedControl(19, 18, 20, 1);
 #define CAL_HOLD_MS 2000         // Test mode: hold REC this long to calibrate
 #define TEST_STATUS_MS 1500      // Test mode: how long "CAL"/"dEF" shows on entry
 #define TEST_RESULT_MS 2000      // Test mode: how long "CAL"/"Err"/"dEF" shows after calibrating or clearing
+#define AUTOCAL_RESULT_MS 2000   // First-boot calibration: how long "CAL" or "Err" shows
 
 // Volatile variables shared between ISR and main loop
 volatile bool stateChanged = false;
@@ -64,6 +68,12 @@ unsigned long testMessageDurationMs = 0;  // How long it stays before the channe
 const uint8_t WORD_CAL[3] = { 0x4E, 0x77, 0x0E };  // "CAL": running this unit's saved thresholds
 const uint8_t WORD_DEF[3] = { 0x3D, 0x4F, 0x47 };  // "dEF": no saved calibration, running the defaults
 const uint8_t WORD_ERR[3] = { 0x4F, 0x05, 0x05 };  // "Err": calibration refused, nothing saved
+const uint8_t WORD_SLD[3] = { 0x5B, 0x0E, 0x3D };  // "SLd": first-boot calibration, slide the carriage
+const uint8_t WORD_SLO[3] = { 0x5B, 0x0E, 0x1D };  // "SLo": moving too fast to measure
+const uint8_t WORD_E_S[3] = { 0x4F, 0x01, 0x5B };  // "E-S": sensor placement can't space the edges (reject)
+const uint8_t WORD_E_CH[3][3] = {                  // "E-A", "E-b", "E-C": that channel's sensor is too weak (reject)
+  { 0x4F, 0x01, 0x77 }, { 0x4F, 0x01, 0x1F }, { 0x4F, 0x01, 0x4E },
+};
 
 Adafruit_USBD_MSC usb_msc;
 
@@ -195,7 +205,8 @@ enum modes {
   STANDBY,
   CAPTURE,
   MOUNT_DRIVE,
-  TEST
+  TEST,
+  AUTOCAL
 };
 modes mode = STANDBY;
 modes last_mode = INITIALISED;
@@ -218,8 +229,9 @@ void setup() {
   Serial.printf("# fw=%s VrefA=%u VrefB=%u VrefC=%u mV cal=%s\n", VERSION_STRING, getVref(CH_A), getVref(CH_B),
                 getVref(CH_C), isCalibrated() ? "yes" : "no");
 
-  // Enter test mode if record button is held down at power-up/reset
+  // Enter test mode if record button is held down at power-up/reset. A unit never calibrated calibrates first.
   if (digitalRead(btnRec) == 0) mode = TEST;
+  else if (calibrationBlank()) mode = AUTOCAL;
 
   // Set disk vendor id, product id and revision with string up to 8, 16, 4 characters respectively
   usb_msc.setID("DntPanic", "Mass Storage", VERSION_STRING);
@@ -257,6 +269,9 @@ void loop() {
       break;
     case TEST:
       handleTestMode();
+      break;
+    case AUTOCAL:
+      handleAutoCalMode();
       break;
   }
 }
@@ -404,7 +419,9 @@ void handleTestMode() {
       if (recording) {
         recording = false;
         haveSweep = true;
-        printTestSummary();
+        SweepResult r;
+        analyseSweep(r);
+        printSweepSummary(r);
       } else {
         processEncoderChange();  // Sync previousState to the pins so the reset itself isn't counted
         positionCounter = 0;
@@ -420,22 +437,17 @@ void handleTestMode() {
     if (recording) {  // A hold also ends the recording
       recording = false;
       haveSweep = true;
-      printTestSummary();
+      SweepResult r;
+      analyseSweep(r);
+      printSweepSummary(r);
     }
     if (!haveSweep) Serial.println("# calibration=failed reason=no_sweep");
     bool saved = haveSweep && calibrateFromSweep();
     showTestMessage(saved ? WORD_CAL : WORD_ERR, TEST_RESULT_MS);
   }
 
-  uint32_t pinUs = micros();  // The comparator states, then each sensor voltage, read back to back
-  processEncoderChange();
-
-  uint32_t adcUs[NUM_CHANNELS];
-  for (uint8_t ch = 0; ch < NUM_CHANNELS; ch++) {
-    uint32_t readStartUs = micros();
-    sensorMv[ch] = readSensorMillivolts(ch);
-    adcUs[ch] = readStartUs + (micros() - readStartUs) / 2;  // The middle of the oversampled read
-  }
+  uint32_t pinUs, adcUs[NUM_CHANNELS];
+  readSensors(pinUs, adcUs, sensorMv);
   // The recording freezes when it stops, so a later hold calibrates from exactly that sweep
   if (recording) sweepAdd(pinUs, currentState, adcUs, sensorMv);
 
@@ -460,15 +472,115 @@ void handleTestMode() {
   handleSerialCommand();
 }
 
+// The comparator states (into currentState) at pinUs, then each sensor voltage, read back to back. adcUs is the middle
+// of each channel's oversampled read.
+void readSensors(uint32_t& pinUs, uint32_t adcUs[], uint16_t mv[]) {
+  pinUs = micros();
+  processEncoderChange();
+  for (uint8_t ch = 0; ch < NUM_CHANNELS; ch++) {
+    uint32_t readStartUs = micros();
+    mv[ch] = readSensorMillivolts(ch);
+    adcUs[ch] = readStartUs + (micros() - readStartUs) / 2;
+  }
+}
+
+// First-boot calibration (autocal.h): records from power-up while the technician slides the carriage, and saves the
+// thresholds once the analysis settles, then carries on in normal mode. The display shows "SLd" (slide) throughout,
+// its decimal points filling left to right as good data builds up, and "SLo" while the carriage moves too fast to
+// measure. It ends with "CAL", or with a fault code that stays: "E-A", "E-b" or "E-C" for a weak sensor, "E-S" when
+// the sensors' placement can't space the edges. "Err" means it is starting over, and the technician keeps sliding.
+void handleAutoCalMode() {
+  static uint16_t sensorMv[NUM_CHANNELS];
+  static SweepResult r;
+  static bool faulted, saved;
+
+  if (mode != last_mode) {
+    last_mode = mode;
+    faulted = saved = false;
+    Serial.println("# autocal: not calibrated yet. Slide the carriage end to end at a steady pace until the display shows CAL.");
+    Serial.println("# Commands. K skips calibrating for this boot, X clears the saved calibration.");
+    processEncoderChange();  // Sync previousState to the pins
+    autocalBegin();
+    showTestMessage(WORD_SLD, 0);
+  }
+
+  if (saved) {  // "CAL" is showing: then normal operation
+    if (millis() - testMessageMs >= AUTOCAL_RESULT_MS) mode = STANDBY;
+    return;
+  }
+  handleSerialCommand();
+  if (faulted || mode != AUTOCAL) return;
+
+  uint32_t pinUs, adcUs[NUM_CHANNELS];
+  readSensors(pinUs, adcUs, sensorMv);
+  sweepAdd(pinUs, currentState, adcUs, sensorMv);
+
+  uint8_t channel = 0;
+  unsigned long startMs = millis();
+  AutoCalOutcome outcome = autocalUpdate(micros(), r, channel);
+  if (outcome != AUTOCAL_RECORDING) {  // Each analysis, for a bench PC to log
+    Serial.printf("# autocal travel=%u analysis_ms=%lu\n", sweepTravel(), millis() - startMs);
+    if (outcome != AUTOCAL_START_OVER) {
+      uint16_t suggested[NUM_CHANNELS];
+      for (uint8_t ch = 0; ch < NUM_CHANNELS; ch++) suggested[ch] = r.ch[ch].suggestVref;
+      printSpacing("autocal_suggest", suggested, r.simSuggest);
+    }
+  }
+  switch (outcome) {
+    case AUTOCAL_SETTLED:
+      printSweepSummary(r);
+      saved = calibrateFrom(r);
+      if (saved) {
+        Serial.println("# autocal=done");
+        showTestMessage(WORD_CAL, AUTOCAL_RESULT_MS);
+        return;
+      }
+      Serial.println("# autocal=start_over reason=refused");
+      autocalBegin();
+      showTestMessage(WORD_ERR, AUTOCAL_RESULT_MS);
+      return;
+    case AUTOCAL_WEAK:
+    case AUTOCAL_MISPLACED:
+      printSweepSummary(r);
+      faulted = true;
+      if (outcome == AUTOCAL_WEAK) {
+        Serial.printf("# autocal=fault reason=weak_sensor ch=%c span=%d min_span=%u\n", 'A' + channel,
+                      r.ch[channel].darkMv - r.ch[channel].lightMv, MIN_SPAN_MV);
+        showTestMessage(WORD_E_CH[channel], 0);
+      } else {
+        Serial.printf("# autocal=fault reason=placement best=%.2f min_width=%.2f\n", r.simSuggest.bestWidth,
+                      MIN_STATE_WIDTH_MM);
+        showTestMessage(WORD_E_S, 0);
+      }
+      testMessageDurationMs = UINT32_MAX;  // A fault stays on the display
+      return;
+    case AUTOCAL_START_OVER:
+      Serial.println("# autocal=start_over reason=not_settled");
+      autocalBegin();
+      showTestMessage(WORD_ERR, AUTOCAL_RESULT_MS);
+      return;
+    default:
+      break;
+  }
+
+  // "SLd", with a decimal point lit per third of the clean periods needed, or "SLo" while too fast. Nothing that
+  // counts up, so it can't be read as a displacement. "Err" shows out its time first.
+  if (millis() - testMessageMs < testMessageDurationMs) return;
+  if (sweepTooFast(micros())) {
+    showTestMessage(WORD_SLO, 0);
+  } else {
+    uint8_t filled = autocalProgress();
+    for (uint8_t i = 0; i < 3; i++) lc.setRow(0, 2 - i, WORD_SLD[i] | (i < filled ? 0x80 : 0));
+  }
+}
+
 // What one sweep measured. Per channel, in mV: min/max are the light/dark levels on BUFF_x; rise/fall are where the
 // comparator switched at the Vref in force (hyst_src says whether they were measured), and the margins are how far the
 // dark and light levels cleared them. duty is the fraction of each period it read light; half is the Vref that makes
 // that half, and suggest is where the three Vrefs together space the edges best. Then the widths of the six encoder
 // states in mm (ideally 1 each): from the comparators (hw), and simulated at the current (sim), half-duty (half) and
 // suggested (suggest) Vrefs. Everything is key=value, so the Serial Plotter ignores it.
-void printTestSummary() {
-  SweepResult r;
-  analyseSweep(r);
+void printSweepSummary(const SweepResult& r) {
   uint16_t active[NUM_CHANNELS], half[NUM_CHANNELS], suggested[NUM_CHANNELS];
   bool haveSuggestion = true;
   for (uint8_t ch = 0; ch < NUM_CHANNELS; ch++) {
@@ -500,7 +612,8 @@ void printTestSummary() {
     printSpacing("half", half, r.simHalf);
     printSpacing("suggest", suggested, r.simSuggest);
   }
-  Serial.printf("# recovered=%u lost=%u position=%d\n", recoveredSkips, lostCounts, positionCounter);
+  // First-boot calibration's analyses stall the loop mid-motion, so its decoder counts say nothing about the unit
+  if (mode == TEST) Serial.printf("# recovered=%u lost=%u position=%d\n", recoveredSkips, lostCounts, positionCounter);
 }
 
 // Shows a 3-letter status word on the 7-seg, pausing the test-mode channel mirror for durationMs
@@ -513,7 +626,8 @@ void showTestMessage(const uint8_t word[3], unsigned long durationMs) {
 }
 
 // Test-mode commands, one per line. "A 820" sets channel A's Vref to 820 mV until reset (not saved). "S" toggles the
-// stream. "X" clears the saved calibration.
+// stream. "X" clears the saved calibration, so the next boot calibrates as a new unit. "K" skips first-boot calibration
+// for this boot.
 void handleSerialCommand() {
   static char line[16];
   static uint8_t len = 0;
@@ -536,12 +650,16 @@ void handleSerialCommand() {
       Serial.printf("# stream=%s\n", testStream ? "on" : "off");
     } else if (cmd == 'X') {
       clearCalibration();
-      showTestMessage(WORD_DEF, TEST_RESULT_MS);
+      Serial.println("# cal=cleared next_boot=autocal");
+      if (mode == TEST) showTestMessage(WORD_DEF, TEST_RESULT_MS);
+    } else if (cmd == 'K' && mode == AUTOCAL) {
+      Serial.println("# autocal=skipped (defaults until the next boot)");
+      mode = STANDBY;
     } else if (cmd >= 'A' && cmd <= 'C' && end != line + 1 && mv >= 0 && mv <= VDD_MV) {
       setVref(cmd - 'A', mv);
       Serial.printf("# Vref%c=%u mV (not saved)\n", cmd, getVref(cmd - 'A'));
     } else {
-      Serial.println("# Commands. A/B/C <mV> sets that channel's Vref (not saved), S toggles the stream, X clears the saved calibration.");
+      Serial.println("# Commands. A/B/C <mV> sets that channel's Vref (not saved), S toggles the stream, X clears the saved calibration, K skips first-boot calibration.");
     }
   }
 }

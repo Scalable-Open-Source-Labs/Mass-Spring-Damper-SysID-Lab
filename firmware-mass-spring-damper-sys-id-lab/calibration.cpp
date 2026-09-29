@@ -56,14 +56,27 @@ bool loadCalibration(uint16_t vref_mV[]) {
   return calibrated;
 }
 
-// Sets the thresholds from the recorded sweep where they space the encoder's edges best: each channel light for half of
-// each strip period, with the others giving way when a margin holds one short (sweep.h). Then saves and applies them.
-// Saves nothing if a channel's light and dark levels are too close (a weak sensor), the sweep has too few full periods,
-// or the comparators, simulated over the sweep at the new thresholds, would leave any state narrower than
-// MIN_STATE_WIDTH_MM. The flash write stalls interrupts for tens of ms, so only call this from test mode.
+// True if this unit has never been calibrated: the calibration sector holds no calibration at all, as on a freshly
+// programmed chip or after clearCalibration(). A stale version or corrupt data doesn't count, so a deployed unit never
+// falls into the first-boot calibration.
+bool calibrationBlank() {
+  return saved.magic != CAL_MAGIC;
+}
+
+// Analyses the recorded sweep and calibrates from it, as calibrateFrom()
 bool calibrateFromSweep() {
   SweepResult r;
   analyseSweep(r);
+  return calibrateFrom(r);
+}
+
+// Sets the thresholds from an analysed sweep where they space the encoder's edges best: each channel light for half of
+// each strip period, with the others giving way when a margin holds one short (sweep.h). Then saves and applies them.
+// Saves nothing if a channel's light and dark levels are too close (a weak sensor), the sweep has too few full periods,
+// or the comparators, simulated over the sweep at the new thresholds, would leave any state narrower than
+// MIN_STATE_WIDTH_MM. The flash write stalls interrupts for tens of ms, so only call this from test mode or first-boot
+// calibration.
+bool calibrateFrom(const SweepResult& r) {
   Calibration cal = {};
   for (uint8_t ch = 0; ch < NUM_CHANNELS; ch++) {
     const ChannelResult& c = r.ch[ch];
@@ -115,11 +128,13 @@ bool calibrateFromSweep() {
   return true;
 }
 
-// Forgets the saved calibration and returns every channel to VREF_DEFAULT_MV
+// Forgets the saved calibration and returns every channel to VREF_DEFAULT_MV. The next boot then calibrates as a
+// freshly programmed unit does (calibrationBlank()).
 void clearCalibration() {
   Calibration blank = {};
   EEPROM.put(0, blank);
   EEPROM.commit();
+  saved = blank;
   calibrated = false;
 
   const uint16_t defaults[NUM_CHANNELS] = { VREF_DEFAULT_MV, VREF_DEFAULT_MV, VREF_DEFAULT_MV };

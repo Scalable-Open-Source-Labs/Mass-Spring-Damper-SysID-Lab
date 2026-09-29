@@ -5,6 +5,8 @@
 #include "gpio.h"
 #include "sweep.h"
 #include "calibration.h"
+#include "autocal.h"
+#include <functional>
 #include <vector>
 #include <random>
 #include <algorithm>
@@ -288,6 +290,102 @@ static void printResult(const SweepResult& r) {
   }
 }
 
+// ---- First-boot calibration: the same loop, but autocal.cpp decides when to stop ----
+struct AutoRun {
+  AutoCalOutcome outcome;  // How it ended: AUTOCAL_RECORDING if the motion ran out first
+  uint8_t channel;         // The weak channel, for AUTOCAL_WEAK
+  double seconds;          // When it ended
+  uint16_t travel;         // Periods of usable travel by then
+  int startOvers;
+  bool saved;
+  uint16_t vref[3];        // The saved thresholds
+};
+
+static AutoRun autoRun(const Channel ch[3], std::function<double(double)> at, double seconds, uint32_t seed,
+                       double loopUs = 250, double stallUs = 350000) {
+  std::mt19937 rng(seed);
+  std::uniform_real_distribution<double> jitter(-30, 30);
+  std::normal_distribution<double> noise(0, 3);
+  for (int c = 0; c < 3; c++) setVref(c, VREF_DEFAULT_MV);
+  autocalBegin();
+  AutoRun run{ AUTOCAL_RECORDING, 0, seconds, 0, 0, false, { 0, 0, 0 } };
+  bool light[3];
+  for (int c = 0; c < 3; c++)
+    light[c] = buffMv(ch[c], at(0)) < (trueRise(ch[c], VREF_DEFAULT_MV) + trueFall(ch[c], VREF_DEFAULT_MV)) / 2;
+  const uint32_t base = 4294000000u;
+  double t = 0, lastT = 0, end = seconds * 1e6;
+  static SweepResult r;
+  while (t < end) {
+    for (double tt = lastT; tt < t; tt += 5) {
+      double x = at(tt * 1e-6);
+      for (int c = 0; c < 3; c++) {
+        double v = buffMv(ch[c], x);
+        if (!light[c] && v < trueFall(ch[c], VREF_DEFAULT_MV)) light[c] = true;
+        else if (light[c] && v > trueRise(ch[c], VREF_DEFAULT_MV)) light[c] = false;
+      }
+    }
+    lastT = t;
+    uint8_t state = 0;
+    for (int c = 0; c < 3; c++) if (light[c]) state |= CHANNEL_BIT(c);
+    uint32_t adcUs[3];
+    uint16_t mv[3];
+    for (int c = 0; c < 3; c++) {
+      double ta = t + ADC_DELAY_US[c];
+      adcUs[c] = base + (uint32_t)llround(ta);
+      mv[c] = (uint16_t)std::max(0.0, std::round(buffMv(ch[c], at(ta * 1e-6)) + noise(rng)));
+    }
+    sweepAdd(base + (uint32_t)llround(t), state, adcUs, mv);
+    uint8_t channel = 0;
+    AutoCalOutcome o = autocalUpdate(base + (uint32_t)llround(t + ADC_DELAY_US[2]), r, channel);
+    if (o != AUTOCAL_RECORDING) t += stallUs;  // The analysis stalls the loop, and the hand doesn't wait
+    if (o == AUTOCAL_START_OVER) {
+      run.startOvers++;
+      autocalBegin();
+    } else if (o == AUTOCAL_SETTLED || o == AUTOCAL_WEAK || o == AUTOCAL_MISPLACED) {
+      run.outcome = o;
+      run.channel = channel;
+      run.seconds = t * 1e-6;
+      run.travel = sweepTravel();
+      if (o == AUTOCAL_SETTLED) {
+        run.saved = calibrateFrom(r);
+        for (int c = 0; c < 3; c++) run.vref[c] = r.ch[c].suggestVref;
+      }
+      return run;
+    }
+    t += loopUs + jitter(rng);
+  }
+  run.travel = sweepTravel();
+  return run;
+}
+
+static const char* outcomeName(AutoCalOutcome o) {
+  switch (o) {
+    case AUTOCAL_SETTLED: return "settled";
+    case AUTOCAL_WEAK: return "weak";
+    case AUTOCAL_MISPLACED: return "misplaced";
+    default: return "still recording";
+  }
+}
+
+static void printAutoRun(const char* what, const AutoRun& a) {
+  printf("  %s: %s after %.1f s, %u periods of travel, %d start overs", what, outcomeName(a.outcome), a.seconds,
+         a.travel, a.startOvers);
+  if (a.saved) printf(", saved %u/%u/%u", a.vref[0], a.vref[1], a.vref[2]);
+  printf("\n");
+}
+
+// A calibration that settles saves thresholds within tol of the best the margins allow
+static void checkAutoSettles(const char* what, const Channel ch[3], const AutoRun& a, const Optimum& opt,
+                             double tol = 0.03) {
+  printAutoRun(what, a);
+  CHECK(a.outcome == AUTOCAL_SETTLED && a.saved, "%s: didn't settle and save (%s)", what, outcomeName(a.outcome));
+  if (!a.saved) return;
+  Truth t = trueSpacing(ch, a.vref);
+  printf("  %s: true narrowest %.3f, optimum %.3f\n", what, t.narrowest, opt.narrowest);
+  CHECK(t.narrowest >= opt.narrowest - tol, "%s: saved thresholds give %.3f, optimum %.3f", what, t.narrowest,
+        opt.narrowest);
+}
+
 static uint16_t oldMidpointVref(uint16_t mid) { return ((uint32_t)(mid + 50) * 33 + 17) / 34; }  // Calibration v1
 
 int main() {
@@ -479,6 +577,71 @@ int main() {
   SweepResult rs = sweep(skew, v780, threePasses, 14);
   printResult(rs);
   CHECK(!calibrateFromSweep(), "calibration accepted a 0.4 mm state");
+
+  // 12. First-boot calibration: a technician slides until the unit settles, or it names a fault
+  printf("== 12. First-boot calibration\n");
+  auto hand = [](Motion m) { return [m](double s) { return m.at(s); }; };
+  Motion slides = passes(20, -40, 40, 2.0, 0.5);
+  AutoRun a1 = autoRun(ch1, hand(slides), slides.total(), 41);
+  checkAutoSettles("steady slides", ch1, a1, opt1);
+  CHECK(a1.travel <= 60, "steady slides took %u periods of travel", a1.travel);
+  AutoRun aB1 = autoRun(b1, hand(slides), slides.total(), 42);
+  checkAutoSettles("board 1", b1, aB1, optB1);
+  Motion shortRests = passes(20, -40, 40, 2.0, 0.3);
+  checkAutoSettles("0.3 s rests", ch1, autoRun(ch1, hand(shortRests), shortRests.total(), 43), opt1);
+  // A careless technician: never pauses, or rushes with a sloppy hand. The analyses stall the loop mid-motion.
+  Motion noRests = passes(40, -40, 40, 2.0, 0);
+  AutoRun anr = autoRun(ch1, hand(noRests), noRests.total(), 53);
+  checkAutoSettles("no rests", ch1, anr, opt1);
+  CHECK(anr.seconds <= 30, "no rests took %.1f s", anr.seconds);
+  Motion rushed = passes(60, -40, 40, 1.0, 0);
+  rushed.wobbleMm = 0.6;
+  AutoRun ar = autoRun(ch1, hand(rushed), rushed.total(), 54);
+  checkAutoSettles("rushed and sloppy", ch1, ar, opt1, 0.05);
+  CHECK(ar.seconds <= 30, "rushed and sloppy took %.1f s", ar.seconds);
+  AutoRun asr = autoRun(ch1, hand(shortRests), shortRests.total(), 55);
+  CHECK(asr.seconds <= 15, "0.3 s rests took %.1f s", asr.seconds);
+  Motion wobbly = passes(20, -40, 40, 6.0, 0.5);
+  checkAutoSettles("slow 3 Hz wobble", ch1, autoRun(ch1, hand(wobbly), wobbly.total(), 44), opt1, 0.08);
+  checkAutoSettles("deep clipping", ch3, autoRun(ch3, hand(slides), slides.total(), 45), trueOptimum(ch3));
+  checkAutoSettles("unclipped", ch4, autoRun(ch4, hand(slides), slides.total(), 46), trueOptimum(ch4));
+
+  // A channel whose default threshold sits below its light level never switches until calibrated
+  Channel lifted[3] = { { 0, 0.33, 95, 0 }, { 1, 0.22, 95, 0 }, { 2, 0.33, 95, 0 } };
+  checkAutoSettles("B never switches at 780", lifted, autoRun(lifted, hand(slides), slides.total(), 47),
+                   trueOptimum(lifted));
+
+  AutoRun aw = autoRun(weak, hand(slides), slides.total(), 48);
+  printAutoRun("weak B", aw);
+  CHECK(aw.outcome == AUTOCAL_WEAK && aw.channel == 1, "weak B: %s ch %u", outcomeName(aw.outcome), aw.channel);
+  AutoRun am = autoRun(skew, hand(slides), slides.total(), 49);
+  printAutoRun("C 0.6 mm late", am);
+  CHECK(am.outcome == AUTOCAL_MISPLACED, "C 0.6 mm late: %s", outcomeName(am.outcome));
+
+  // Plucks: the fast swings don't count, and whatever the slow tail gives must still be right
+  auto pluck = [](double s) {
+    double tau = fmod(s, 8.0), w = 2 * M_PI * 3;
+    return 30 * exp(-0.05 * w * tau) * cos(w * tau);
+  };
+  AutoRun ap = autoRun(ch1, pluck, 16, 50);
+  printAutoRun("two plucks", ap);
+  if (ap.saved) {
+    Truth t = trueSpacing(ch1, ap.vref);
+    CHECK(t.narrowest >= opt1.narrowest - 0.03, "plucks saved thresholds giving %.3f", t.narrowest);
+  }
+
+  // A carriage jiggled on the bench, never more than 2 mm: nothing to calibrate from, and no false fault
+  std::mt19937 jig(51);
+  std::vector<double> jiggle;
+  for (int i = 0; i < 1200; i++) jiggle.push_back(std::uniform_real_distribution<double>(-2, 2)(jig));
+  auto bench = [&jiggle](double s) {
+    size_t i = std::min(jiggle.size() - 2, (size_t)(s / 0.05));
+    double f = s / 0.05 - i;
+    return jiggle[i] + (jiggle[i + 1] - jiggle[i]) * f;
+  };
+  AutoRun aj = autoRun(ch1, bench, 60, 52);
+  printAutoRun("bench jiggle", aj);
+  CHECK(aj.outcome == AUTOCAL_RECORDING && !aj.saved, "bench jiggle ended as %s", outcomeName(aj.outcome));
 
   // 11. johnsonStep against the old transition table
   printf("== 11. johnsonStep vs the old table\n");
