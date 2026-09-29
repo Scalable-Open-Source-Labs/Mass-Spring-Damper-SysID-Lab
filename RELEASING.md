@@ -17,7 +17,7 @@ A release is a tagged, tested snapshot containing only what's needed to manufact
 
 `{tag}` is the release tag (e.g. `release-2026-08-16`) and goes on every asset uniformly, enclosure files included — they're just as versioned as the firmware or fab outputs, they'd just been missing the label. This is one shared label applied mechanically to everything in the release, not a per-file judgment call. It's also the only version baked into a filename: firmware's own internal `VERSION_MAJOR`/`VERSION_MINOR` stays out of asset names (it's already recorded in the release notes below, and in the binary itself) rather than mixing two numbering schemes into one string.
 
-**Not included as files:** `Assembly-Instructions.md` and `Ordering-Instructions.md`. Both use paths relative to the repo (the assembly guide embeds images from `Images/`; the ordering doc links to `Enclosure/`, `PCB/README.md`, `Datasheets/`) — copying just the `.md` file into a flat release bundle breaks those links and the images render as missing. Instead, link both from the release notes as GitHub blob URLs pinned to the release tag (see template below) — GitHub resolves the relative image paths correctly when viewing a file at a specific ref, so the docs stay fully working without duplicating `Images/` into every release.
+**Not included as files:** `Assembly-Instructions.md`, `Ordering-Instructions.md` and `JLCPCB-Ordering-Instructions.md`. All use paths relative to the repo (the assembly guide embeds images from `Images/`; the ordering doc links to `Enclosure/`, `PCB/README.md`, `Datasheets/`; the JLCPCB guide embeds images from `Images/ordering/`) — copying just the `.md` file into a flat release bundle breaks those links and the images render as missing. Instead, link both from the release notes as GitHub blob URLs pinned to the release tag (see template below) — GitHub resolves the relative image paths correctly when viewing a file at a specific ref, so the docs stay fully working without duplicating `Images/` into every release.
 
 ## Versioning
 
@@ -61,6 +61,7 @@ sourcing changes, fit or compatibility notes for anyone with an already-built un
 
 ### Instructions
 - [Ordering Instructions](https://github.com/Scaleable-Open-Source-Labs/Mass-Spring-Damper-SysID-Lab/blob/release-2026-08-16/Ordering-Instructions.md)
+- [JLCPCB Ordering Instructions](https://github.com/Scaleable-Open-Source-Labs/Mass-Spring-Damper-SysID-Lab/blob/release-2026-08-16/JLCPCB-Ordering-Instructions.md)
 - [Assembly Instructions](https://github.com/Scaleable-Open-Source-Labs/Mass-Spring-Damper-SysID-Lab/blob/release-2026-08-16/Assembly-Instructions.md)
 - [Programming Instructions](https://github.com/Scaleable-Open-Source-Labs/Mass-Spring-Damper-SysID-Lab/blob/release-2026-08-16/Programming-Instructions.md)
 ```
